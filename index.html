@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Quick Capture Lists</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-content">
+            <h1>📝 Quick Capture</h1>
+            <div class="header-actions">
+                <button id="searchBtn" class="icon-btn" title="Search">🔍</button>
+                <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
+                <button id="logoutBtn" class="icon-btn" title="Logout">🚪</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Quick Add Section -->
+    <div class="quick-add-section">
+        <div class="quick-add-container">
+            <input
+                type="text"
+                id="quickAddInput"
+                placeholder="Add item..."
+                autocomplete="off"
+            >
+            <select id="listSelector" class="list-selector">
+                <option value="">Select list...</option>
+            </select>
+            <button id="addItemBtn" class="add-btn">+</button>
+        </div>
+        <button id="createListBtn" class="create-list-btn">+ New List</button>
+    </div>
+
+    <!-- Search Section (Hidden by default) -->
+    <div id="searchSection" class="search-section" style="display: none;">
+        <div class="search-container">
+            <input
+                type="text"
+                id="searchInput"
+                placeholder="Search all lists..."
+                autocomplete="off"
+            >
+            <button id="closeSearchBtn" class="icon-btn">✕</button>
+        </div>
+        <div id="searchResults" class="search-results"></div>
+    </div>
+
+    <!-- Lists Container -->
+    <main class="lists-container" id="listsContainer">
+        <!-- Lists will be dynamically inserted here -->
+    </main>
+
+    <!-- Modals -->
+
+    <!-- Create/Edit List Modal -->
+    <div id="listModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="listModalTitle">Create New List</h2>
+                <button class="close-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="listNameInput">List Name</label>
+                    <input
+                        type="text"
+                        id="listNameInput"
+                        placeholder="e.g., Home Tasks, Shopping, Ideas..."
+                        autocomplete="off"
+                    >
+                </div>
+                <div class="form-group">
+                    <label for="listIconInput">Icon (emoji)</label>
+                    <input
+                        type="text"
+                        id="listIconInput"
+                        placeholder="📌"
+                        maxlength="2"
+                        autocomplete="off"
+                    >
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelListBtn" class="btn-secondary">Cancel</button>
+                <button id="saveListBtn" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Item Modal -->
+    <div id="editItemModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Item</h2>
+                <button class="close-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="editItemInput">Item Text</label>
+                    <input
+                        type="text"
+                        id="editItemInput"
+                        placeholder="Item text..."
+                        autocomplete="off"
+                    >
+                </div>
+                <div class="form-group">
+                    <label for="moveToListSelect">Move to List</label>
+                    <select id="moveToListSelect" class="list-selector">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelEditItemBtn" class="btn-secondary">Cancel</button>
+                <button id="saveEditItemBtn" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="close-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Account</h3>
+                    <p id="userEmail" class="user-email"></p>
+                </div>
+                <div class="settings-section">
+                    <h3>Data Management</h3>
+                    <button id="exportDataBtn" class="btn-secondary full-width">Export All Data (JSON)</button>
+                    <button id="clearCompletedBtn" class="btn-secondary full-width">Clear All Completed Items</button>
+                </div>
+                <div class="settings-section">
+                    <h3>Sharing</h3>
+                    <p class="hint">Share lists with other users (coming soon)</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="close-modal btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Actions Bar (Hidden by default) -->
+    <div id="bulkActionsBar" class="bulk-actions-bar" style="display: none;">
+        <span id="selectedCount">0 selected</span>
+        <div class="bulk-actions">
+            <button id="bulkCompleteBtn" class="bulk-btn">✓ Complete</button>
+            <button id="bulkDeleteBtn" class="bulk-btn">✕ Delete</button>
+            <button id="bulkMoveBtn" class="bulk-btn">→ Move</button>
+            <button id="cancelBulkBtn" class="bulk-btn">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="loading-indicator">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Scripts -->
+    <script type="module" src="firebase-service.js"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
