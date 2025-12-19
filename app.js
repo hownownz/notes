@@ -8,6 +8,7 @@ let currentEditingItem = null;
 let currentItemListId = null;
 let collapsedLists = new Set();
 let selectedItems = new Map(); // Map of listId -> Set of itemIds
+let listFilters = new Map(); // Map of listId -> filter type ('all', 'incomplete', 'completed')
 let draggedElement = null;
 let draggedItemId = null;
 let draggedListId = null;
@@ -345,6 +346,7 @@ function createListCard(list) {
             </div>
             <div class="list-header-right">
                 <div class="list-actions">
+                    <button class="list-action-btn filter" data-action="cycle-filter" title="Filter: All">🔽</button>
                     <button class="list-action-btn edit" data-action="edit-list" title="Edit list">✏️</button>
                     <button class="list-action-btn delete" data-action="delete-list" title="Delete list">🗑️</button>
                 </div>
@@ -364,6 +366,12 @@ function createListCard(list) {
         toggleListCollapse(list.id);
     });
 
+    // Cycle Filter
+    card.querySelector('[data-action="cycle-filter"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        cycleListFilter(list.id);
+    });
+
     // Edit List
     card.querySelector('[data-action="edit-list"]').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -379,13 +387,38 @@ function createListCard(list) {
     return card;
 }
 
+function cycleListFilter(listId) {
+    const currentFilter = listFilters.get(listId) || 'all';
+    const filters = ['all', 'incomplete', 'completed'];
+    const currentIndex = filters.indexOf(currentFilter);
+    const nextIndex = (currentIndex + 1) % filters.length;
+    const nextFilter = filters[nextIndex];
+
+    listFilters.set(listId, nextFilter);
+    renderLists();
+
+    const filterLabels = { 'all': 'All', 'incomplete': 'Incomplete', 'completed': 'Completed' };
+    showToast(`Filter: ${filterLabels[nextFilter]}`, 'success');
+}
+
 function renderEmptyListState() {
     return '<div class="empty-list">No items yet. Add one above!</div>';
 }
 
 function renderItems(items, listId) {
+    // Get filter for this list
+    const filter = listFilters.get(listId) || 'all';
+
+    // Filter items based on filter setting
+    let filteredItems = items;
+    if (filter === 'incomplete') {
+        filteredItems = items.filter(item => !item.completed);
+    } else if (filter === 'completed') {
+        filteredItems = items.filter(item => item.completed);
+    }
+
     // Sort items by order
-    const sortedItems = [...items].sort((a, b) => a.order - b.order);
+    const sortedItems = [...filteredItems].sort((a, b) => a.order - b.order);
 
     return sortedItems.map(item => {
         const isSelected = selectedItems.get(listId)?.has(item.id) || false;
@@ -756,7 +789,15 @@ function setupDragAndDrop() {
         container.addEventListener('dragleave', handleListDragLeave);
     });
 
-    // Lists drag and drop (can be added later)
+    // List cards drag and drop for reordering
+    const listCards = document.querySelectorAll('.list-card');
+    listCards.forEach((card, index) => {
+        card.setAttribute('draggable', 'true');
+        card.addEventListener('dragstart', handleListCardDragStart);
+        card.addEventListener('dragend', handleListCardDragEnd);
+        card.addEventListener('dragover', handleListCardDragOver);
+        card.addEventListener('drop', handleListCardDrop);
+    });
 }
 
 function handleItemDragStart(e) {
@@ -865,6 +906,71 @@ async function handleListDrop(e) {
     } catch (error) {
         console.error('Error moving item:', error);
         showToast('Failed to move item', 'error');
+    }
+}
+
+// List Card Drag and Drop for Reordering
+let draggedListCard = null;
+let draggedListCardId = null;
+
+function handleListCardDragStart(e) {
+    // Don't drag if clicking on buttons
+    if (e.target.closest('button') || e.target.closest('input')) {
+        e.preventDefault();
+        return;
+    }
+
+    draggedListCard = e.currentTarget;
+    draggedListCardId = e.currentTarget.dataset.listId;
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleListCardDragEnd(e) {
+    e.currentTarget.classList.remove('dragging');
+    document.querySelectorAll('.list-card').forEach(card => {
+        card.classList.remove('drag-over');
+    });
+}
+
+function handleListCardDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const targetCard = e.currentTarget;
+    if (targetCard !== draggedListCard) {
+        targetCard.classList.add('drag-over');
+    }
+}
+
+async function handleListCardDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const targetCard = e.currentTarget;
+    const targetListId = targetCard.dataset.listId;
+
+    targetCard.classList.remove('drag-over');
+
+    if (!draggedListCardId || !targetListId || draggedListCardId === targetListId) return;
+
+    // Find indices
+    const draggedIndex = currentLists.findIndex(l => l.id === draggedListCardId);
+    const targetIndex = currentLists.findIndex(l => l.id === targetListId);
+
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    // Reorder array
+    const reorderedLists = [...currentLists];
+    const [removed] = reorderedLists.splice(draggedIndex, 1);
+    reorderedLists.splice(targetIndex, 0, removed);
+
+    try {
+        await FirebaseService.reorderLists(reorderedLists.map(l => l.id));
+        showToast('Lists reordered!', 'success');
+    } catch (error) {
+        console.error('Error reordering lists:', error);
+        showToast('Failed to reorder lists', 'error');
     }
 }
 
