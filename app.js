@@ -20,6 +20,7 @@ const listSelector = document.getElementById('listSelector');
 const addItemBtn = document.getElementById('addItemBtn');
 const createListBtn = document.getElementById('createListBtn');
 const searchBtn = document.getElementById('searchBtn');
+const darkModeBtn = document.getElementById('darkModeBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const searchSection = document.getElementById('searchSection');
@@ -81,6 +82,34 @@ function initializeApp() {
     if (savedCollapsed) {
         collapsedLists = new Set(JSON.parse(savedCollapsed));
     }
+
+    // Initialize dark mode
+    initializeDarkMode();
+}
+
+function initializeDarkMode() {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        darkModeBtn.textContent = '☀️';
+        darkModeBtn.title = 'Toggle Light Mode';
+    }
+}
+
+function toggleDarkMode() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+
+    if (currentTheme === 'dark') {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'light');
+        darkModeBtn.textContent = '🌙';
+        darkModeBtn.title = 'Toggle Dark Mode';
+    } else {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+        darkModeBtn.textContent = '☀️';
+        darkModeBtn.title = 'Toggle Light Mode';
+    }
 }
 
 function setupEventListeners() {
@@ -97,6 +126,9 @@ function setupEventListeners() {
     searchBtn.addEventListener('click', toggleSearch);
     closeSearchBtn.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
+
+    // Dark Mode
+    darkModeBtn.addEventListener('click', toggleDarkMode);
 
     // Settings
     settingsBtn.addEventListener('click', () => openModal(settingsModal));
