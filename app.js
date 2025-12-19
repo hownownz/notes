@@ -9,6 +9,7 @@ let currentItemListId = null;
 let collapsedLists = new Set();
 let selectedItems = new Map(); // Map of listId -> Set of itemIds
 let listFilters = new Map(); // Map of listId -> filter type ('all', 'incomplete', 'completed')
+let isSelectionMode = false; // Whether we're in selection mode for bulk actions
 let draggedElement = null;
 let draggedItemId = null;
 let draggedListId = null;
@@ -21,6 +22,7 @@ const listSelector = document.getElementById('listSelector');
 const addItemBtn = document.getElementById('addItemBtn');
 const createListBtn = document.getElementById('createListBtn');
 const searchBtn = document.getElementById('searchBtn');
+const selectionModeBtn = document.getElementById('selectionModeBtn');
 const darkModeBtn = document.getElementById('darkModeBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const logoutBtn = document.getElementById('logoutBtn');
@@ -129,6 +131,9 @@ function setupEventListeners() {
     searchBtn.addEventListener('click', toggleSearch);
     closeSearchBtn.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
+
+    // Selection Mode
+    selectionModeBtn.addEventListener('click', toggleSelectionMode);
 
     // Dark Mode
     darkModeBtn.addEventListener('click', toggleDarkMode);
@@ -424,13 +429,13 @@ function renderItems(items, listId) {
         const isSelected = selectedItems.get(listId)?.has(item.id) || false;
         const hasNotes = item.notes && item.notes.trim().length > 0;
         return `
-        <div class="list-item ${item.completed ? 'completed' : ''} ${isSelected ? 'selected' : ''}"
+        <div class="list-item ${item.completed ? 'completed' : ''} ${isSelected ? 'selected' : ''} ${isSelectionMode ? 'selection-mode' : ''}"
              data-item-id="${item.id}"
              data-list-id="${listId}"
              draggable="true">
-            <input type="checkbox" class="item-select-checkbox" data-action="select-item" ${isSelected ? 'checked' : ''}>
+            ${isSelectionMode ? `<input type="checkbox" class="item-select-checkbox" data-action="select-item" ${isSelected ? 'checked' : ''}>` : ''}
             <div class="item-checkbox" data-action="toggle-item"></div>
-            <div class="item-text" data-action="edit-item">
+            <div class="item-text" data-action="${isSelectionMode ? 'select-item' : 'toggle-item'}">
                 ${escapeHtml(item.text)}
                 ${hasNotes ? '<span class="has-notes-indicator" title="Has notes">📝</span>' : ''}
             </div>
@@ -673,9 +678,36 @@ function updateBulkActionsBar() {
     }
 }
 
+function toggleSelectionMode() {
+    isSelectionMode = !isSelectionMode;
+
+    if (!isSelectionMode) {
+        // Exiting selection mode, clear selections
+        selectedItems.clear();
+    }
+
+    updateBulkActionsBar();
+    updateSelectionModeButton();
+    renderLists();
+}
+
+function updateSelectionModeButton() {
+    if (isSelectionMode) {
+        selectionModeBtn.style.background = 'var(--primary-color)';
+        selectionModeBtn.style.color = 'white';
+        selectionModeBtn.title = 'Exit Selection Mode';
+    } else {
+        selectionModeBtn.style.background = '';
+        selectionModeBtn.style.color = '';
+        selectionModeBtn.title = 'Selection Mode';
+    }
+}
+
 function clearSelection() {
     selectedItems.clear();
+    isSelectionMode = false;
     updateBulkActionsBar();
+    updateSelectionModeButton();
     renderLists();
 }
 
