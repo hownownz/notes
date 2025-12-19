@@ -42,11 +42,13 @@ const listModal = document.getElementById('listModal');
 const listModalTitle = document.getElementById('listModalTitle');
 const listNameInput = document.getElementById('listNameInput');
 const listIconInput = document.getElementById('listIconInput');
+const listColorInput = document.getElementById('listColorInput');
 const saveListBtn = document.getElementById('saveListBtn');
 const cancelListBtn = document.getElementById('cancelListBtn');
 
 const editItemModal = document.getElementById('editItemModal');
 const editItemInput = document.getElementById('editItemInput');
+const editItemNotes = document.getElementById('editItemNotes');
 const moveToListSelect = document.getElementById('moveToListSelect');
 const saveEditItemBtn = document.getElementById('saveEditItemBtn');
 const cancelEditItemBtn = document.getElementById('cancelEditItemBtn');
@@ -248,13 +250,73 @@ function renderLists() {
 }
 
 function renderNoListsState() {
+    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
+
     listsContainer.innerHTML = `
         <div class="no-lists-state">
             <div class="no-lists-state-icon">📝</div>
-            <h2>No Lists Yet</h2>
-            <p>Create your first list to get started!</p>
+            <h2>${hasSeenWelcome ? 'No Lists Yet' : 'Welcome to Quick Capture!'}</h2>
+            <p>${hasSeenWelcome ? 'Create your first list to get started!' : 'Organize your tasks, shopping, and ideas with fast, simple lists.'}</p>
+            ${!hasSeenWelcome ? `
+                <div class="welcome-actions">
+                    <button id="createSampleListsBtn" class="btn-primary" style="margin: 20px auto; display: block;">
+                        Create Sample Lists
+                    </button>
+                    <button id="skipWelcomeBtn" class="btn-secondary" style="margin: 10px auto; display: block;">
+                        Start from Scratch
+                    </button>
+                </div>
+            ` : ''}
         </div>
     `;
+
+    if (!hasSeenWelcome) {
+        document.getElementById('createSampleListsBtn')?.addEventListener('click', createSampleLists);
+        document.getElementById('skipWelcomeBtn')?.addEventListener('click', () => {
+            localStorage.setItem('hasSeenWelcome', 'true');
+            renderLists();
+        });
+    }
+}
+
+async function createSampleLists() {
+    try {
+        const sampleLists = [
+            { name: 'Shopping', icon: '🛒', color: '#10b981', items: ['Milk', 'Bread', 'Eggs'] },
+            { name: 'Home Tasks', icon: '🏠', color: '#3b82f6', items: ['Clean kitchen', 'Water plants'] },
+            { name: 'Ideas', icon: '💡', color: '#f59e0b', items: ['Weekend project ideas'] }
+        ];
+
+        for (let i = 0; i < sampleLists.length; i++) {
+            const sampleList = sampleLists[i];
+            await FirebaseService.createList({
+                name: sampleList.name,
+                icon: sampleList.icon,
+                color: sampleList.color,
+                order: i
+            });
+
+            // Wait for list to be created then add items
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Get the created list ID
+            const lists = await FirebaseService.getAllLists();
+            const createdList = lists.find(l => l.name === sampleList.name);
+
+            if (createdList && sampleList.items) {
+                for (const itemText of sampleList.items) {
+                    await FirebaseService.addItem(createdList.id, { text: itemText });
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+        }
+
+        localStorage.setItem('hasSeenWelcome', 'true');
+        showToast('Sample lists created!', 'success');
+    } catch (error) {
+        console.error('Error creating sample lists:', error);
+        showToast('Failed to create sample lists', 'error');
+    }
 }
 
 function createListCard(list) {
@@ -265,6 +327,12 @@ function createListCard(list) {
     const card = document.createElement('div');
     card.className = `list-card ${isCollapsed ? 'collapsed' : ''}`;
     card.dataset.listId = list.id;
+
+    // Apply color if set
+    if (list.color) {
+        card.style.borderLeftColor = list.color;
+        card.style.borderLeftWidth = '4px';
+    }
 
     card.innerHTML = `
         <div class="list-header" data-list-id="${list.id}">
@@ -321,6 +389,7 @@ function renderItems(items, listId) {
 
     return sortedItems.map(item => {
         const isSelected = selectedItems.get(listId)?.has(item.id) || false;
+        const hasNotes = item.notes && item.notes.trim().length > 0;
         return `
         <div class="list-item ${item.completed ? 'completed' : ''} ${isSelected ? 'selected' : ''}"
              data-item-id="${item.id}"
@@ -328,7 +397,10 @@ function renderItems(items, listId) {
              draggable="true">
             <input type="checkbox" class="item-select-checkbox" data-action="select-item" ${isSelected ? 'checked' : ''}>
             <div class="item-checkbox" data-action="toggle-item"></div>
-            <div class="item-text" data-action="edit-item">${escapeHtml(item.text)}</div>
+            <div class="item-text" data-action="edit-item">
+                ${escapeHtml(item.text)}
+                ${hasNotes ? '<span class="has-notes-indicator" title="Has notes">📝</span>' : ''}
+            </div>
             <div class="item-actions">
                 <button class="item-action-btn" data-action="edit-item" title="Edit">✏️</button>
                 <button class="item-action-btn delete" data-action="delete-item" title="Delete">✕</button>
@@ -397,6 +469,7 @@ function openCreateListModal() {
     listModalTitle.textContent = 'Create New List';
     listNameInput.value = '';
     listIconInput.value = '📌';
+    listColorInput.value = '#3b82f6';
     openModal(listModal);
     listNameInput.focus();
 }
@@ -406,6 +479,7 @@ function openEditListModal(list) {
     listModalTitle.textContent = 'Edit List';
     listNameInput.value = list.name;
     listIconInput.value = list.icon;
+    listColorInput.value = list.color || '#3b82f6';
     openModal(listModal);
     listNameInput.focus();
 }
@@ -413,6 +487,7 @@ function openEditListModal(list) {
 async function handleSaveList() {
     const name = listNameInput.value.trim();
     const icon = listIconInput.value.trim() || '📌';
+    const color = listColorInput.value;
 
     if (!name) {
         showToast('Please enter a list name', 'warning');
@@ -422,13 +497,14 @@ async function handleSaveList() {
     try {
         if (currentEditingList) {
             // Update existing list
-            await FirebaseService.updateList(currentEditingList.id, { name, icon });
+            await FirebaseService.updateList(currentEditingList.id, { name, icon, color });
             showToast('List updated!', 'success');
         } else {
             // Create new list
             await FirebaseService.createList({
                 name,
                 icon,
+                color,
                 order: currentLists.length
             });
             showToast('List created!', 'success');
@@ -485,6 +561,7 @@ function openEditItemModal(listId, itemId) {
     currentItemListId = listId;
 
     editItemInput.value = item.text;
+    editItemNotes.value = item.notes || '';
     moveToListSelect.value = listId;
 
     openModal(editItemModal);
@@ -493,6 +570,7 @@ function openEditItemModal(listId, itemId) {
 
 async function handleSaveEditItem() {
     const newText = editItemInput.value.trim();
+    const newNotes = editItemNotes.value.trim();
     const newListId = moveToListSelect.value;
 
     if (!newText) {
@@ -503,13 +581,13 @@ async function handleSaveEditItem() {
     try {
         // Check if moving to different list
         if (newListId !== currentItemListId) {
-            // Update text first, then move
-            await FirebaseService.updateItem(currentItemListId, currentEditingItem.id, { text: newText });
+            // Update text and notes first, then move
+            await FirebaseService.updateItem(currentItemListId, currentEditingItem.id, { text: newText, notes: newNotes });
             await FirebaseService.moveItem(currentItemListId, newListId, currentEditingItem.id);
             showToast('Item moved and updated!', 'success');
         } else {
-            // Just update text
-            await FirebaseService.updateItem(currentItemListId, currentEditingItem.id, { text: newText });
+            // Just update text and notes
+            await FirebaseService.updateItem(currentItemListId, currentEditingItem.id, { text: newText, notes: newNotes });
             showToast('Item updated!', 'success');
         }
 
@@ -670,6 +748,14 @@ function setupDragAndDrop() {
         item.addEventListener('drop', handleItemDrop);
     });
 
+    // Allow dropping on list containers for cross-list moves
+    const listContainers = document.querySelectorAll('.list-items');
+    listContainers.forEach(container => {
+        container.addEventListener('dragover', handleListDragOver);
+        container.addEventListener('drop', handleListDrop);
+        container.addEventListener('dragleave', handleListDragLeave);
+    });
+
     // Lists drag and drop (can be added later)
 }
 
@@ -740,6 +826,45 @@ async function handleItemDrop(e) {
             console.error('Error moving item:', error);
             showToast('Failed to move item', 'error');
         }
+    }
+}
+
+function handleListDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const listContainer = e.currentTarget;
+    listContainer.classList.add('drag-over-list');
+}
+
+function handleListDragLeave(e) {
+    const listContainer = e.currentTarget;
+    // Only remove if leaving the container, not entering a child
+    if (!listContainer.contains(e.relatedTarget)) {
+        listContainer.classList.remove('drag-over-list');
+    }
+}
+
+async function handleListDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const listContainer = e.currentTarget;
+    const targetListId = listContainer.dataset.listId;
+
+    listContainer.classList.remove('drag-over-list');
+
+    if (!draggedItemId || !draggedListId || !targetListId) return;
+
+    // Don't do anything if dropping on same list
+    if (draggedListId === targetListId) return;
+
+    // Move item to the target list
+    try {
+        await FirebaseService.moveItem(draggedListId, targetListId, draggedItemId);
+        showToast('Item moved!', 'success');
+    } catch (error) {
+        console.error('Error moving item:', error);
+        showToast('Failed to move item', 'error');
     }
 }
 

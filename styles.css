@@ -484,6 +484,12 @@ body {
     color: var(--text-muted);
 }
 
+.has-notes-indicator {
+    margin-left: 8px;
+    font-size: 12px;
+    opacity: 0.6;
+}
+
 .item-actions {
     display: flex;
     gap: 4px;
@@ -831,6 +837,10 @@ body {
 
 /* Responsive Design */
 @media (max-width: 640px) {
+    :root {
+        --quick-add-height: 260px;
+    }
+
     .app-header h1 {
         font-size: 18px;
     }
@@ -868,6 +878,12 @@ body {
 /* Drag and Drop */
 .drag-over {
     border-top: 3px solid var(--primary-color);
+}
+
+.drag-over-list {
+    background: var(--bg-tertiary);
+    border: 2px dashed var(--primary-color);
+    border-radius: var(--radius-md);
 }
 
 /* No Lists State */
