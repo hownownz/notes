@@ -406,6 +406,15 @@ body {
     cursor: grabbing;
 }
 
+.item-select-checkbox {
+    width: 18px;
+    height: 18px;
+    margin-right: 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: var(--primary-color);
+}
+
 .item-checkbox {
     width: 20px;
     height: 20px;

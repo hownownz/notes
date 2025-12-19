@@ -7,6 +7,7 @@ let currentEditingList = null;
 let currentEditingItem = null;
 let currentItemListId = null;
 let collapsedLists = new Set();
+let selectedItems = new Map(); // Map of listId -> Set of itemIds
 let draggedElement = null;
 let draggedItemId = null;
 let draggedListId = null;
@@ -27,6 +28,14 @@ const closeSearchBtn = document.getElementById('closeSearchBtn');
 const searchResults = document.getElementById('searchResults');
 const toast = document.getElementById('toast');
 
+// Bulk Actions
+const bulkActionsBar = document.getElementById('bulkActionsBar');
+const selectedCount = document.getElementById('selectedCount');
+const bulkCompleteBtn = document.getElementById('bulkCompleteBtn');
+const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+const bulkMoveBtn = document.getElementById('bulkMoveBtn');
+const cancelBulkBtn = document.getElementById('cancelBulkBtn');
+
 // Modals
 const listModal = document.getElementById('listModal');
 const listModalTitle = document.getElementById('listModalTitle');
@@ -44,6 +53,8 @@ const cancelEditItemBtn = document.getElementById('cancelEditItemBtn');
 const settingsModal = document.getElementById('settingsModal');
 const userEmail = document.getElementById('userEmail');
 const exportDataBtn = document.getElementById('exportDataBtn');
+const importDataBtn = document.getElementById('importDataBtn');
+const importFileInput = document.getElementById('importFileInput');
 const clearCompletedBtn = document.getElementById('clearCompletedBtn');
 
 // Initialize App
@@ -90,10 +101,18 @@ function setupEventListeners() {
     // Settings
     settingsBtn.addEventListener('click', () => openModal(settingsModal));
     exportDataBtn.addEventListener('click', handleExportData);
+    importDataBtn.addEventListener('click', handleImportData);
+    importFileInput.addEventListener('change', handleImportFileSelected);
     clearCompletedBtn.addEventListener('click', handleClearAllCompleted);
 
     // Logout
     logoutBtn.addEventListener('click', handleLogout);
+
+    // Bulk Actions
+    bulkCompleteBtn.addEventListener('click', handleBulkComplete);
+    bulkDeleteBtn.addEventListener('click', handleBulkDelete);
+    bulkMoveBtn.addEventListener('click', handleBulkMove);
+    cancelBulkBtn.addEventListener('click', clearSelection);
 
     // List Modal
     saveListBtn.addEventListener('click', handleSaveList);
@@ -118,6 +137,54 @@ function setupEventListeners() {
                 closeModal(modal);
             }
         });
+    });
+
+    // Keyboard Shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Check if user is typing in an input/textarea
+        const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+
+        // Ctrl/Cmd + N: Create new list
+        if ((e.ctrlKey || e.metaKey) && e.key === 'n' && !isTyping) {
+            e.preventDefault();
+            openCreateListModal();
+        }
+
+        // Ctrl/Cmd + F: Open search
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            e.preventDefault();
+            if (searchSection.style.display === 'none') {
+                toggleSearch();
+            } else {
+                searchInput.focus();
+            }
+        }
+
+        // Ctrl/Cmd + E: Export data
+        if ((e.ctrlKey || e.metaKey) && e.key === 'e' && !isTyping) {
+            e.preventDefault();
+            handleExportData();
+        }
+
+        // Escape: Close modals/search
+        if (e.key === 'Escape') {
+            // Close any open modal
+            if (listModal.classList.contains('active')) {
+                closeModal(listModal);
+            } else if (editItemModal.classList.contains('active')) {
+                closeModal(editItemModal);
+            } else if (settingsModal.classList.contains('active')) {
+                closeModal(settingsModal);
+            } else if (searchSection.style.display !== 'none') {
+                toggleSearch();
+            }
+        }
+
+        // Ctrl/Cmd + K: Focus quick-add input
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            quickAddInput.focus();
+        }
     });
 }
 
@@ -220,11 +287,14 @@ function renderItems(items, listId) {
     // Sort items by order
     const sortedItems = [...items].sort((a, b) => a.order - b.order);
 
-    return sortedItems.map(item => `
-        <div class="list-item ${item.completed ? 'completed' : ''}"
+    return sortedItems.map(item => {
+        const isSelected = selectedItems.get(listId)?.has(item.id) || false;
+        return `
+        <div class="list-item ${item.completed ? 'completed' : ''} ${isSelected ? 'selected' : ''}"
              data-item-id="${item.id}"
              data-list-id="${listId}"
              draggable="true">
+            <input type="checkbox" class="item-select-checkbox" data-action="select-item" ${isSelected ? 'checked' : ''}>
             <div class="item-checkbox" data-action="toggle-item"></div>
             <div class="item-text" data-action="edit-item">${escapeHtml(item.text)}</div>
             <div class="item-actions">
@@ -232,7 +302,8 @@ function renderItems(items, listId) {
                 <button class="item-action-btn delete" data-action="delete-item" title="Delete">✕</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function updateListSelector() {
@@ -427,6 +498,88 @@ async function handleDeleteItem(listId, itemId) {
     }
 }
 
+// Bulk Selection and Actions
+function handleSelectItem(listId, itemId) {
+    if (!selectedItems.has(listId)) {
+        selectedItems.set(listId, new Set());
+    }
+
+    const itemSet = selectedItems.get(listId);
+    if (itemSet.has(itemId)) {
+        itemSet.delete(itemId);
+        if (itemSet.size === 0) {
+            selectedItems.delete(listId);
+        }
+    } else {
+        itemSet.add(itemId);
+    }
+
+    updateBulkActionsBar();
+    renderLists();
+}
+
+function updateBulkActionsBar() {
+    const totalSelected = Array.from(selectedItems.values())
+        .reduce((sum, set) => sum + set.size, 0);
+
+    if (totalSelected > 0) {
+        bulkActionsBar.style.display = 'flex';
+        selectedCount.textContent = `${totalSelected} selected`;
+    } else {
+        bulkActionsBar.style.display = 'none';
+    }
+}
+
+function clearSelection() {
+    selectedItems.clear();
+    updateBulkActionsBar();
+    renderLists();
+}
+
+async function handleBulkComplete() {
+    try {
+        const promises = [];
+        for (const [listId, itemIds] of selectedItems.entries()) {
+            promises.push(FirebaseService.toggleItemsCompletion(listId, Array.from(itemIds), true));
+        }
+        await Promise.all(promises);
+        clearSelection();
+        showToast('Items completed!', 'success');
+    } catch (error) {
+        console.error('Error completing items:', error);
+        showToast('Failed to complete items', 'error');
+    }
+}
+
+async function handleBulkDelete() {
+    const totalSelected = Array.from(selectedItems.values())
+        .reduce((sum, set) => sum + set.size, 0);
+
+    const confirmed = confirm(`Delete ${totalSelected} selected item(s)?`);
+    if (!confirmed) return;
+
+    try {
+        const promises = [];
+        for (const [listId, itemIds] of selectedItems.entries()) {
+            promises.push(FirebaseService.deleteItems(listId, Array.from(itemIds)));
+        }
+        await Promise.all(promises);
+        clearSelection();
+        showToast('Items deleted!', 'success');
+    } catch (error) {
+        console.error('Error deleting items:', error);
+        showToast('Failed to delete items', 'error');
+    }
+}
+
+async function handleBulkMove() {
+    // For bulk move, we need to show a list selector
+    const targetListId = prompt('Enter destination list ID (feature to be enhanced with modal)');
+    if (!targetListId) return;
+
+    showToast('Bulk move feature coming soon! Use edit modal for now.', 'warning');
+}
+
 // Event Delegation for Dynamic Elements
 listsContainer.addEventListener('click', (e) => {
     const action = e.target.dataset.action || e.target.closest('[data-action]')?.dataset.action;
@@ -439,6 +592,9 @@ listsContainer.addEventListener('click', (e) => {
     const listId = listItem.dataset.listId;
 
     switch (action) {
+        case 'select-item':
+            handleSelectItem(listId, itemId);
+            break;
         case 'toggle-item':
             handleToggleItem(listId, itemId);
             break;
@@ -543,6 +699,15 @@ async function handleItemDrop(e) {
             console.error('Error reordering items:', error);
             showToast('Failed to reorder items', 'error');
         }
+    } else {
+        // Different list - move item
+        try {
+            await FirebaseService.moveItem(draggedListId, targetListId, draggedItemId);
+            showToast('Item moved!', 'success');
+        } catch (error) {
+            console.error('Error moving item:', error);
+            showToast('Failed to move item', 'error');
+        }
     }
 }
 
@@ -622,6 +787,44 @@ async function handleExportData() {
     } catch (error) {
         console.error('Error exporting data:', error);
         showToast('Failed to export data', 'error');
+    }
+}
+
+function handleImportData() {
+    importFileInput.click();
+}
+
+async function handleImportFileSelected(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        // Validate data format
+        if (!data.lists || !Array.isArray(data.lists)) {
+            showToast('Invalid data format', 'error');
+            return;
+        }
+
+        const confirmed = confirm(
+            `This will import ${data.lists.length} list(s). ` +
+            'This will merge with your existing lists. Continue?'
+        );
+
+        if (!confirmed) {
+            importFileInput.value = '';
+            return;
+        }
+
+        await FirebaseService.importData(data);
+        showToast('Data imported successfully!', 'success');
+        importFileInput.value = '';
+    } catch (error) {
+        console.error('Error importing data:', error);
+        showToast('Failed to import data. Please check the file format.', 'error');
+        importFileInput.value = '';
     }
 }
 
