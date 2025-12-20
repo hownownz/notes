@@ -811,6 +811,11 @@ function setupDragAndDrop() {
         item.addEventListener('dragend', handleItemDragEnd);
         item.addEventListener('dragover', handleItemDragOver);
         item.addEventListener('drop', handleItemDrop);
+
+        // Touch events for mobile
+        item.addEventListener('touchstart', handleItemTouchStart, { passive: false });
+        item.addEventListener('touchmove', handleItemTouchMove, { passive: false });
+        item.addEventListener('touchend', handleItemTouchEnd);
     });
 
     // Allow dropping on list containers for cross-list moves
@@ -829,6 +834,11 @@ function setupDragAndDrop() {
         card.addEventListener('dragend', handleListCardDragEnd);
         card.addEventListener('dragover', handleListCardDragOver);
         card.addEventListener('drop', handleListCardDrop);
+
+        // Touch events for mobile list reordering
+        card.addEventListener('touchstart', handleListCardTouchStart, { passive: false });
+        card.addEventListener('touchmove', handleListCardTouchMove, { passive: false });
+        card.addEventListener('touchend', handleListCardTouchEnd);
     });
 }
 
@@ -1004,6 +1014,261 @@ async function handleListCardDrop(e) {
         console.error('Error reordering lists:', error);
         showToast('Failed to reorder lists', 'error');
     }
+}
+
+// Touch Event Handlers for Mobile Drag and Drop
+let touchStartY = 0;
+let touchStartX = 0;
+let touchedElement = null;
+let touchedItemId = null;
+let touchedListId = null;
+let isDragging = false;
+let currentDropTarget = null;
+
+function handleItemTouchStart(e) {
+    // Don't start drag if touching a button
+    if (e.target.closest('button') || e.target.closest('input')) {
+        return;
+    }
+
+    // Require a slight delay/movement before starting drag (prevents accidental drags)
+    touchedElement = e.currentTarget;
+    touchedItemId = e.currentTarget.dataset.itemId;
+    touchedListId = e.currentTarget.dataset.listId;
+
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+
+    isDragging = false;
+
+    // Add visual feedback after a short delay
+    setTimeout(() => {
+        if (touchedElement && !isDragging) {
+            isDragging = true;
+            touchedElement.classList.add('dragging');
+            touchedElement.style.opacity = '0.5';
+        }
+    }, 150);
+}
+
+function handleItemTouchMove(e) {
+    if (!touchedElement) return;
+
+    const touch = e.touches[0];
+    const deltaX = Math.abs(touch.clientX - touchStartX);
+    const deltaY = Math.abs(touch.clientY - touchStartY);
+
+    // Only start dragging if moved more than 10px
+    if (deltaX > 10 || deltaY > 10) {
+        isDragging = true;
+        touchedElement.classList.add('dragging');
+        e.preventDefault(); // Prevent scrolling while dragging
+    }
+
+    if (!isDragging) return;
+
+    // Find element under touch point
+    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dropTarget = elementBelow?.closest('.list-item') || elementBelow?.closest('.list-items');
+
+    // Remove previous drop target highlight
+    if (currentDropTarget && currentDropTarget !== dropTarget) {
+        currentDropTarget.classList.remove('drag-over', 'drag-over-list');
+    }
+
+    // Add highlight to new drop target
+    if (dropTarget && dropTarget !== touchedElement) {
+        currentDropTarget = dropTarget;
+        if (dropTarget.classList.contains('list-item')) {
+            dropTarget.classList.add('drag-over');
+        } else if (dropTarget.classList.contains('list-items')) {
+            dropTarget.classList.add('drag-over-list');
+        }
+    }
+}
+
+async function handleItemTouchEnd(e) {
+    if (!touchedElement) return;
+
+    touchedElement.classList.remove('dragging');
+    touchedElement.style.opacity = '';
+
+    if (currentDropTarget) {
+        currentDropTarget.classList.remove('drag-over', 'drag-over-list');
+    }
+
+    if (!isDragging) {
+        // Reset if didn't actually drag
+        touchedElement = null;
+        touchedItemId = null;
+        touchedListId = null;
+        currentDropTarget = null;
+        return;
+    }
+
+    const touch = e.changedTouches[0];
+    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    const targetItem = elementBelow?.closest('.list-item');
+    const targetListContainer = elementBelow?.closest('.list-items');
+
+    // Drop on another item
+    if (targetItem && targetItem !== touchedElement) {
+        const targetItemId = targetItem.dataset.itemId;
+        const targetListId = targetItem.dataset.listId;
+
+        // Same list - reorder
+        if (touchedListId === targetListId) {
+            const list = currentLists.find(l => l.id === touchedListId);
+            if (list) {
+                const draggedIndex = list.items.findIndex(i => i.id === touchedItemId);
+                const targetIndex = list.items.findIndex(i => i.id === targetItemId);
+
+                if (draggedIndex !== -1 && targetIndex !== -1) {
+                    const items = [...list.items];
+                    const [removed] = items.splice(draggedIndex, 1);
+                    items.splice(targetIndex, 0, removed);
+
+                    try {
+                        await FirebaseService.reorderItems(touchedListId, items.map(i => i.id));
+                    } catch (error) {
+                        console.error('Error reordering items:', error);
+                        showToast('Failed to reorder items', 'error');
+                    }
+                }
+            }
+        } else {
+            // Different list - move item
+            try {
+                await FirebaseService.moveItem(touchedListId, targetListId, touchedItemId);
+                showToast('Item moved!', 'success');
+            } catch (error) {
+                console.error('Error moving item:', error);
+                showToast('Failed to move item', 'error');
+            }
+        }
+    }
+    // Drop on empty list container
+    else if (targetListContainer && !targetItem) {
+        const targetListId = targetListContainer.dataset.listId;
+
+        if (targetListId && targetListId !== touchedListId) {
+            try {
+                await FirebaseService.moveItem(touchedListId, targetListId, touchedItemId);
+                showToast('Item moved!', 'success');
+            } catch (error) {
+                console.error('Error moving item:', error);
+                showToast('Failed to move item', 'error');
+            }
+        }
+    }
+
+    // Reset state
+    touchedElement = null;
+    touchedItemId = null;
+    touchedListId = null;
+    isDragging = false;
+    currentDropTarget = null;
+}
+
+// Touch handlers for list card reordering
+let touchedListCard = null;
+let touchedListCardId = null;
+let listDragging = false;
+
+function handleListCardTouchStart(e) {
+    // Don't drag if touching buttons or inputs
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.list-items')) {
+        return;
+    }
+
+    touchedListCard = e.currentTarget;
+    touchedListCardId = e.currentTarget.dataset.listId;
+
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+
+    listDragging = false;
+
+    setTimeout(() => {
+        if (touchedListCard && !listDragging) {
+            listDragging = true;
+            touchedListCard.classList.add('dragging');
+        }
+    }, 200);
+}
+
+function handleListCardTouchMove(e) {
+    if (!touchedListCard) return;
+
+    const touch = e.touches[0];
+    const deltaX = Math.abs(touch.clientX - touchStartX);
+    const deltaY = Math.abs(touch.clientY - touchStartY);
+
+    if (deltaX > 10 || deltaY > 10) {
+        listDragging = true;
+        e.preventDefault();
+    }
+
+    if (!listDragging) return;
+
+    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dropTarget = elementBelow?.closest('.list-card');
+
+    document.querySelectorAll('.list-card').forEach(card => {
+        card.classList.remove('drag-over');
+    });
+
+    if (dropTarget && dropTarget !== touchedListCard) {
+        dropTarget.classList.add('drag-over');
+    }
+}
+
+async function handleListCardTouchEnd(e) {
+    if (!touchedListCard) return;
+
+    touchedListCard.classList.remove('dragging');
+    document.querySelectorAll('.list-card').forEach(card => {
+        card.classList.remove('drag-over');
+    });
+
+    if (!listDragging) {
+        touchedListCard = null;
+        touchedListCardId = null;
+        return;
+    }
+
+    const touch = e.changedTouches[0];
+    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    const targetCard = elementBelow?.closest('.list-card');
+
+    if (targetCard && targetCard !== touchedListCard) {
+        const targetListId = targetCard.dataset.listId;
+
+        if (touchedListCardId && targetListId && touchedListCardId !== targetListId) {
+            const draggedIndex = currentLists.findIndex(l => l.id === touchedListCardId);
+            const targetIndex = currentLists.findIndex(l => l.id === targetListId);
+
+            if (draggedIndex !== -1 && targetIndex !== -1) {
+                const reorderedLists = [...currentLists];
+                const [removed] = reorderedLists.splice(draggedIndex, 1);
+                reorderedLists.splice(targetIndex, 0, removed);
+
+                try {
+                    await FirebaseService.reorderLists(reorderedLists.map(l => l.id));
+                    showToast('Lists reordered!', 'success');
+                } catch (error) {
+                    console.error('Error reordering lists:', error);
+                    showToast('Failed to reorder lists', 'error');
+                }
+            }
+        }
+    }
+
+    touchedListCard = null;
+    touchedListCardId = null;
+    listDragging = false;
 }
 
 // Search
