@@ -6,6 +6,7 @@ let currentLists = [];
 let currentEditingList = null;
 let currentEditingItem = null;
 let currentItemListId = null;
+let showArchivedLists = false;
 let collapsedLists = new Set();
 let selectedItems = new Map(); // Map of listId -> Set of itemIds
 let listFilters = new Map(); // Map of listId -> filter type ('all', 'incomplete', 'completed')
@@ -64,6 +65,7 @@ const importDataBtn = document.getElementById('importDataBtn');
 const importFileInput = document.getElementById('importFileInput');
 const clearCompletedBtn = document.getElementById('clearCompletedBtn');
 const joinSharedListBtn = document.getElementById('joinSharedListBtn');
+const showArchivedToggle = document.getElementById('showArchivedToggle');
 
 // Initialize App
 FirebaseService.initAuth(
@@ -147,6 +149,7 @@ function setupEventListeners() {
     importFileInput.addEventListener('change', handleImportFileSelected);
     clearCompletedBtn.addEventListener('click', handleClearAllCompleted);
     joinSharedListBtn.addEventListener('click', handleJoinSharedList);
+    showArchivedToggle.addEventListener('change', handleToggleArchivedLists);
 
     // Logout
     logoutBtn.addEventListener('click', handleLogout);
@@ -238,7 +241,7 @@ function subscribeToLists() {
         currentLists = lists;
         renderLists();
         updateListSelector();
-    });
+    }, showArchivedLists);
 }
 
 // Rendering
@@ -335,7 +338,7 @@ function createListCard(list) {
     const totalCount = list.items.length;
 
     const card = document.createElement('div');
-    card.className = `list-card ${isCollapsed ? 'collapsed' : ''}`;
+    card.className = `list-card ${isCollapsed ? 'collapsed' : ''} ${list.archived ? 'archived' : ''}`;
     card.dataset.listId = list.id;
 
     // Apply color if set
@@ -352,15 +355,21 @@ function createListCard(list) {
                     <div class="list-title">
                         ${escapeHtml(list.name)}
                         ${list.isShared ? '<span class="shared-badge" title="Shared list - collaborative">🔗</span>' : ''}
+                        ${list.archived ? '<span class="archived-badge" title="Archived">📦</span>' : ''}
                     </div>
                     <div class="list-count">${completedCount}/${totalCount} completed</div>
                 </div>
             </div>
             <div class="list-header-right">
                 <div class="list-actions">
-                    <button class="list-action-btn filter" data-action="cycle-filter" title="Filter: All">🔽</button>
-                    <button class="list-action-btn edit" data-action="edit-list" title="Edit list">✏️</button>
-                    <button class="list-action-btn delete" data-action="delete-list" title="Delete list">🗑️</button>
+                    ${!list.archived ? `
+                        <button class="list-action-btn filter" data-action="cycle-filter" title="Filter: All">🔽</button>
+                        <button class="list-action-btn edit" data-action="edit-list" title="Edit list">✏️</button>
+                        <button class="list-action-btn archive" data-action="archive-list" title="Archive list">📦</button>
+                    ` : `
+                        <button class="list-action-btn restore" data-action="restore-list" title="Restore list">↩️</button>
+                        <button class="list-action-btn delete" data-action="delete-list" title="Delete permanently">🗑️</button>
+                    `}
                 </div>
                 <span class="collapse-icon">▼</span>
             </div>
@@ -378,23 +387,50 @@ function createListCard(list) {
         toggleListCollapse(list.id);
     });
 
-    // Cycle Filter
-    card.querySelector('[data-action="cycle-filter"]').addEventListener('click', (e) => {
-        e.stopPropagation();
-        cycleListFilter(list.id);
-    });
+    // Cycle Filter (only for non-archived lists)
+    const filterBtn = card.querySelector('[data-action="cycle-filter"]');
+    if (filterBtn) {
+        filterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cycleListFilter(list.id);
+        });
+    }
 
-    // Edit List
-    card.querySelector('[data-action="edit-list"]').addEventListener('click', (e) => {
-        e.stopPropagation();
-        openEditListModal(list);
-    });
+    // Edit List (only for non-archived lists)
+    const editBtn = card.querySelector('[data-action="edit-list"]');
+    if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openEditListModal(list);
+        });
+    }
 
-    // Delete List
-    card.querySelector('[data-action="delete-list"]').addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleDeleteList(list.id, list.name);
-    });
+    // Archive List
+    const archiveBtn = card.querySelector('[data-action="archive-list"]');
+    if (archiveBtn) {
+        archiveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleArchiveList(list.id, list.name);
+        });
+    }
+
+    // Restore List
+    const restoreBtn = card.querySelector('[data-action="restore-list"]');
+    if (restoreBtn) {
+        restoreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleUnarchiveList(list.id, list.name);
+        });
+    }
+
+    // Delete List (permanently)
+    const deleteBtn = card.querySelector('[data-action="delete-list"]');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleDeleteList(list.id, list.name);
+        });
+    }
 
     return card;
 }
@@ -637,6 +673,37 @@ async function handleJoinSharedList() {
         } else {
             showToast('Failed to join shared list', 'error');
         }
+    }
+}
+
+function handleToggleArchivedLists() {
+    showArchivedLists = showArchivedToggle.checked;
+    // Re-subscribe to lists with new filter
+    subscribeToLists();
+}
+
+async function handleArchiveList(listId, listName) {
+    const confirmed = confirm(`Archive "${listName}"?\n\nArchived lists are hidden but can be restored later.`);
+    if (!confirmed) return;
+
+    try {
+        await FirebaseService.archiveList(listId);
+        collapsedLists.delete(listId);
+        saveCollapsedState();
+        showToast('List archived', 'success');
+    } catch (error) {
+        console.error('Error archiving list:', error);
+        showToast('Failed to archive list', 'error');
+    }
+}
+
+async function handleUnarchiveList(listId, listName) {
+    try {
+        await FirebaseService.unarchiveList(listId);
+        showToast(`"${listName}" restored!`, 'success');
+    } catch (error) {
+        console.error('Error unarchiving list:', error);
+        showToast('Failed to restore list', 'error');
     }
 }
 

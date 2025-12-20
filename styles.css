@@ -357,6 +357,22 @@ body {
     cursor: help;
 }
 
+.archived-badge {
+    margin-left: 8px;
+    font-size: 14px;
+    opacity: 0.6;
+    cursor: help;
+}
+
+.list-card.archived {
+    opacity: 0.6;
+    background: var(--bg-secondary);
+}
+
+.list-card.archived .list-header {
+    font-style: italic;
+}
+
 .list-count {
     font-size: 13px;
     color: var(--text-secondary);
@@ -759,6 +775,29 @@ body {
     font-size: 13px;
     color: var(--text-muted);
     font-style: italic;
+}
+
+.setting-item {
+    margin-bottom: 16px;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    padding: 8px 0;
+}
+
+.toggle-label input[type="checkbox"] {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+}
+
+.toggle-label span {
+    font-size: 14px;
+    color: var(--text-primary);
 }
 
 /* Bulk Actions Bar */

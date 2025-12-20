@@ -28,6 +28,7 @@ const db = getFirestore(app);
 let currentUser = null;
 let listsListener = null;
 let sharedListsListener = null;
+let showArchivedLists = false;
 
 // Authentication State Management
 export function initAuth(onUserSignedIn, onUserSignedOut) {
@@ -108,6 +109,28 @@ export async function deleteList(listId) {
     await deleteDoc(listRef);
 }
 
+export async function archiveList(listId) {
+    if (!currentUser) throw new Error('Not authenticated');
+
+    const listRef = await getListRef(listId);
+    await updateDoc(listRef, {
+        archived: true,
+        archivedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+    });
+}
+
+export async function unarchiveList(listId) {
+    if (!currentUser) throw new Error('Not authenticated');
+
+    const listRef = await getListRef(listId);
+    await updateDoc(listRef, {
+        archived: false,
+        archivedAt: null,
+        updatedAt: serverTimestamp()
+    });
+}
+
 export async function getList(listId) {
     if (!currentUser) throw new Error('Not authenticated');
 
@@ -136,7 +159,7 @@ export async function getAllLists() {
 }
 
 // Real-time listener for lists (merges private and shared lists)
-export function subscribeToLists(callback) {
+export function subscribeToLists(callback, includeArchived = false) {
     if (!currentUser) throw new Error('Not authenticated');
 
     // Unsubscribe from previous listeners if exist
@@ -152,7 +175,13 @@ export function subscribeToLists(callback) {
 
     // Helper to merge and callback
     const mergeAndCallback = () => {
-        const allLists = [...privateLists, ...sharedLists];
+        let allLists = [...privateLists, ...sharedLists];
+
+        // Filter out archived lists unless includeArchived is true
+        if (!includeArchived) {
+            allLists = allLists.filter(list => !list.archived);
+        }
+
         // Sort by order
         allLists.sort((a, b) => (a.order || 0) - (b.order || 0));
         callback(allLists);
