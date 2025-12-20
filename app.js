@@ -48,6 +48,7 @@ const listIconInput = document.getElementById('listIconInput');
 const listColorInput = document.getElementById('listColorInput');
 const saveListBtn = document.getElementById('saveListBtn');
 const cancelListBtn = document.getElementById('cancelListBtn');
+const shareListBtn = document.getElementById('shareListBtn');
 
 const editItemModal = document.getElementById('editItemModal');
 const editItemInput = document.getElementById('editItemInput');
@@ -62,6 +63,7 @@ const exportDataBtn = document.getElementById('exportDataBtn');
 const importDataBtn = document.getElementById('importDataBtn');
 const importFileInput = document.getElementById('importFileInput');
 const clearCompletedBtn = document.getElementById('clearCompletedBtn');
+const joinSharedListBtn = document.getElementById('joinSharedListBtn');
 
 // Initialize App
 FirebaseService.initAuth(
@@ -144,6 +146,7 @@ function setupEventListeners() {
     importDataBtn.addEventListener('click', handleImportData);
     importFileInput.addEventListener('change', handleImportFileSelected);
     clearCompletedBtn.addEventListener('click', handleClearAllCompleted);
+    joinSharedListBtn.addEventListener('click', handleJoinSharedList);
 
     // Logout
     logoutBtn.addEventListener('click', handleLogout);
@@ -157,6 +160,7 @@ function setupEventListeners() {
     // List Modal
     saveListBtn.addEventListener('click', handleSaveList);
     cancelListBtn.addEventListener('click', () => closeModal(listModal));
+    shareListBtn.addEventListener('click', handleShareList);
 
     // Edit Item Modal
     saveEditItemBtn.addEventListener('click', handleSaveEditItem);
@@ -345,7 +349,10 @@ function createListCard(list) {
             <div class="list-header-left">
                 <span class="list-icon">${list.icon}</span>
                 <div class="list-title-container">
-                    <div class="list-title">${escapeHtml(list.name)}</div>
+                    <div class="list-title">
+                        ${escapeHtml(list.name)}
+                        ${list.isShared ? '<span class="shared-badge" title="Shared list - collaborative">🔗</span>' : ''}
+                    </div>
                     <div class="list-count">${completedCount}/${totalCount} completed</div>
                 </div>
             </div>
@@ -508,6 +515,7 @@ function openCreateListModal() {
     listNameInput.value = '';
     listIconInput.value = '📌';
     listColorInput.value = '#3b82f6';
+    shareListBtn.style.display = 'none'; // Hide share button for new lists
     openModal(listModal);
     listNameInput.focus();
 }
@@ -518,6 +526,16 @@ function openEditListModal(list) {
     listNameInput.value = list.name;
     listIconInput.value = list.icon;
     listColorInput.value = list.color || '#3b82f6';
+
+    // Show share button for existing lists, update text if already shared
+    if (list.isShared) {
+        shareListBtn.textContent = '🔗 Copy Share ID';
+        shareListBtn.style.display = 'inline-block';
+    } else {
+        shareListBtn.textContent = '🔗 Share List';
+        shareListBtn.style.display = 'inline-block';
+    }
+
     openModal(listModal);
     listNameInput.focus();
 }
@@ -567,6 +585,58 @@ async function handleDeleteList(listId, listName) {
     } catch (error) {
         console.error('Error deleting list:', error);
         showToast('Failed to delete list', 'error');
+    }
+}
+
+async function handleShareList() {
+    if (!currentEditingList) return;
+
+    try {
+        let shareId;
+
+        if (currentEditingList.isShared) {
+            // Already shared, just copy the ID
+            shareId = currentEditingList.id;
+        } else {
+            // Convert to shared list
+            const confirmed = confirm(`Convert "${currentEditingList.name}" to a shared list?\n\nOnce shared, anyone with the Share ID can join and collaborate on this list.`);
+            if (!confirmed) return;
+
+            shareId = await FirebaseService.convertToSharedList(currentEditingList.id);
+            showToast('List converted to shared!', 'success');
+        }
+
+        // Copy ID to clipboard
+        await navigator.clipboard.writeText(shareId);
+        showToast('Share ID copied to clipboard!', 'success');
+
+        closeModal(listModal);
+    } catch (error) {
+        console.error('Error sharing list:', error);
+        showToast('Failed to share list', 'error');
+    }
+}
+
+async function handleJoinSharedList() {
+    const shareId = prompt('Enter the Share ID you received:');
+
+    if (!shareId || !shareId.trim()) {
+        return;
+    }
+
+    try {
+        await FirebaseService.joinSharedList(shareId.trim());
+        showToast('Successfully joined shared list!', 'success');
+        closeModal(settingsModal);
+    } catch (error) {
+        console.error('Error joining shared list:', error);
+        if (error.message.includes('already a member')) {
+            showToast('You are already a member of this list', 'warning');
+        } else if (error.message.includes('not found')) {
+            showToast('Shared list not found. Check the Share ID.', 'error');
+        } else {
+            showToast('Failed to join shared list', 'error');
+        }
     }
 }
 

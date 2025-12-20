@@ -13,7 +13,10 @@ import {
     onSnapshot,
     serverTimestamp,
     query,
-    orderBy
+    orderBy,
+    where,
+    arrayUnion,
+    arrayRemove
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import firebaseConfig from './firebase-config.js';
 
@@ -24,6 +27,7 @@ const db = getFirestore(app);
 
 let currentUser = null;
 let listsListener = null;
+let sharedListsListener = null;
 
 // Authentication State Management
 export function initAuth(onUserSignedIn, onUserSignedOut) {
@@ -52,6 +56,18 @@ export async function logout() {
     }
 }
 
+// Helper function to get list reference (works with both private and shared lists)
+async function getListRef(listId) {
+    if (!currentUser) throw new Error('Not authenticated');
+
+    // Check if it's a shared list (starts with "shared_")
+    if (listId.startsWith('shared_')) {
+        return doc(db, 'sharedLists', listId);
+    } else {
+        return doc(db, 'users', currentUser.uid, 'lists', listId);
+    }
+}
+
 // Database Operations - Lists
 
 export async function createList(listData) {
@@ -77,7 +93,7 @@ export async function createList(listData) {
 export async function updateList(listId, updates) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
 
     await updateDoc(listRef, {
         ...updates,
@@ -88,14 +104,14 @@ export async function updateList(listId, updates) {
 export async function deleteList(listId) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     await deleteDoc(listRef);
 }
 
 export async function getList(listId) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (listSnap.exists()) {
@@ -119,29 +135,62 @@ export async function getAllLists() {
     return lists;
 }
 
-// Real-time listener for lists
+// Real-time listener for lists (merges private and shared lists)
 export function subscribeToLists(callback) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    // Unsubscribe from previous listener if exists
+    // Unsubscribe from previous listeners if exist
     if (listsListener) {
         listsListener();
     }
+    if (sharedListsListener) {
+        sharedListsListener();
+    }
 
-    const listsRef = collection(db, 'users', currentUser.uid, 'lists');
-    const q = query(listsRef, orderBy('order', 'asc'));
+    let privateLists = [];
+    let sharedLists = [];
 
-    listsListener = onSnapshot(q, (snapshot) => {
-        const lists = [];
+    // Helper to merge and callback
+    const mergeAndCallback = () => {
+        const allLists = [...privateLists, ...sharedLists];
+        // Sort by order
+        allLists.sort((a, b) => (a.order || 0) - (b.order || 0));
+        callback(allLists);
+    };
+
+    // Listen to private lists
+    const privateListsRef = collection(db, 'users', currentUser.uid, 'lists');
+    const privateQuery = query(privateListsRef, orderBy('order', 'asc'));
+
+    listsListener = onSnapshot(privateQuery, (snapshot) => {
+        privateLists = [];
         snapshot.forEach((doc) => {
-            lists.push(doc.data());
+            privateLists.push(doc.data());
         });
-        callback(lists);
+        mergeAndCallback();
     }, (error) => {
-        console.error('Error listening to lists:', error);
+        console.error('Error listening to private lists:', error);
     });
 
-    return listsListener;
+    // Listen to shared lists where user is a member
+    const sharedListsRef = collection(db, 'sharedLists');
+    const sharedQuery = query(sharedListsRef, where('sharedWith', 'array-contains', currentUser.uid));
+
+    sharedListsListener = onSnapshot(sharedQuery, (snapshot) => {
+        sharedLists = [];
+        snapshot.forEach((doc) => {
+            sharedLists.push(doc.data());
+        });
+        mergeAndCallback();
+    }, (error) => {
+        console.error('Error listening to shared lists:', error);
+    });
+
+    // Return cleanup function
+    return () => {
+        if (listsListener) listsListener();
+        if (sharedListsListener) sharedListsListener();
+    };
 }
 
 // Database Operations - Items
@@ -149,7 +198,7 @@ export function subscribeToLists(callback) {
 export async function addItem(listId, itemData) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -178,7 +227,7 @@ export async function addItem(listId, itemData) {
 export async function updateItem(listId, itemId, updates) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -202,7 +251,7 @@ export async function updateItem(listId, itemId, updates) {
 export async function deleteItem(listId, itemId) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -222,8 +271,8 @@ export async function moveItem(fromListId, toListId, itemId) {
     if (!currentUser) throw new Error('Not authenticated');
 
     // Get both lists
-    const fromListRef = doc(db, 'users', currentUser.uid, 'lists', fromListId);
-    const toListRef = doc(db, 'users', currentUser.uid, 'lists', toListId);
+    const fromListRef = await getListRef(fromListId);
+    const toListRef = await getListRef(toListId);
 
     const [fromListSnap, toListSnap] = await Promise.all([
         getDoc(fromListRef),
@@ -265,7 +314,7 @@ export async function moveItem(fromListId, toListId, itemId) {
 export async function reorderItems(listId, itemsOrder) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -306,7 +355,7 @@ export async function reorderLists(listsOrder) {
 export async function toggleItemsCompletion(listId, itemIds, completed) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -330,7 +379,7 @@ export async function toggleItemsCompletion(listId, itemIds, completed) {
 export async function deleteItems(listId, itemIds) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -349,7 +398,7 @@ export async function deleteItems(listId, itemIds) {
 export async function clearCompletedItems(listId) {
     if (!currentUser) throw new Error('Not authenticated');
 
-    const listRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const listRef = await getListRef(listId);
     const listSnap = await getDoc(listRef);
 
     if (!listSnap.exists()) {
@@ -437,10 +486,127 @@ export function searchAllLists(lists, searchTerm) {
     return results;
 }
 
+// Shared Lists - Top-level collection for collaborative lists
+
+export async function convertToSharedList(listId) {
+    if (!currentUser) throw new Error('Not authenticated');
+
+    // Get the private list
+    const privateListRef = doc(db, 'users', currentUser.uid, 'lists', listId);
+    const privateListSnap = await getDoc(privateListRef);
+
+    if (!privateListSnap.exists()) {
+        throw new Error('List not found');
+    }
+
+    const listData = privateListSnap.data();
+
+    // Create shared list ID
+    const sharedListId = `shared_${Date.now()}`;
+    const sharedListRef = doc(db, 'sharedLists', sharedListId);
+
+    // Create shared list with owner and permissions
+    const sharedList = {
+        ...listData,
+        id: sharedListId,
+        originalId: listId, // Keep reference to original
+        isShared: true,
+        owner: currentUser.uid,
+        ownerEmail: currentUser.email,
+        sharedWith: [currentUser.uid], // Owner is in the list
+        permissions: {
+            [currentUser.uid]: 'owner'
+        },
+        sharedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+    };
+
+    // Save to shared collection and delete from private
+    await Promise.all([
+        setDoc(sharedListRef, sharedList),
+        deleteDoc(privateListRef)
+    ]);
+
+    return sharedListId;
+}
+
+export async function joinSharedList(sharedListId) {
+    if (!currentUser) throw new Error('Not authenticated');
+
+    const sharedListRef = doc(db, 'sharedLists', sharedListId);
+    const sharedListSnap = await getDoc(sharedListRef);
+
+    if (!sharedListSnap.exists()) {
+        throw new Error('Shared list not found');
+    }
+
+    const listData = sharedListSnap.data();
+
+    // Check if already a member
+    if (listData.sharedWith && listData.sharedWith.includes(currentUser.uid)) {
+        throw new Error('You are already a member of this list');
+    }
+
+    // Add user to sharedWith array with edit permission
+    const updatedSharedWith = [...(listData.sharedWith || []), currentUser.uid];
+    const updatedPermissions = {
+        ...listData.permissions,
+        [currentUser.uid]: 'edit'
+    };
+
+    await updateDoc(sharedListRef, {
+        sharedWith: updatedSharedWith,
+        permissions: updatedPermissions,
+        updatedAt: serverTimestamp()
+    });
+
+    return sharedListSnap.data();
+}
+
+export async function leaveSharedList(sharedListId) {
+    if (!currentUser) throw new Error('Not authenticated');
+
+    const sharedListRef = doc(db, 'sharedLists', sharedListId);
+    const sharedListSnap = await getDoc(sharedListRef);
+
+    if (!sharedListSnap.exists()) {
+        throw new Error('Shared list not found');
+    }
+
+    const listData = sharedListSnap.data();
+
+    // Can't leave if you're the owner
+    if (listData.owner === currentUser.uid) {
+        throw new Error('Owner cannot leave. Delete the list instead.');
+    }
+
+    // Remove user from sharedWith array
+    const updatedSharedWith = listData.sharedWith.filter(uid => uid !== currentUser.uid);
+    const updatedPermissions = { ...listData.permissions };
+    delete updatedPermissions[currentUser.uid];
+
+    await updateDoc(sharedListRef, {
+        sharedWith: updatedSharedWith,
+        permissions: updatedPermissions,
+        updatedAt: serverTimestamp()
+    });
+}
+
+// Helper to check if user can edit a shared list
+export function canEditSharedList(list) {
+    if (!currentUser || !list.isShared) return false;
+    const permission = list.permissions?.[currentUser.uid];
+    return permission === 'owner' || permission === 'edit';
+}
+
 // Cleanup
 export function cleanup() {
     if (listsListener) {
         listsListener();
         listsListener = null;
+    }
+    if (sharedListsListener) {
+        sharedListsListener();
+        sharedListsListener = null;
     }
 }

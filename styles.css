@@ -350,6 +350,13 @@ body {
     color: var(--text-primary);
 }
 
+.shared-badge {
+    margin-left: 8px;
+    font-size: 14px;
+    opacity: 0.7;
+    cursor: help;
+}
+
 .list-count {
     font-size: 13px;
     color: var(--text-secondary);
