@@ -1024,6 +1024,8 @@ let touchedItemId = null;
 let touchedListId = null;
 let isDragging = false;
 let currentDropTarget = null;
+let longPressTimeout = null;
+let hasMoved = false;
 
 function handleItemTouchStart(e) {
     // Don't start drag if touching a button
@@ -1031,7 +1033,7 @@ function handleItemTouchStart(e) {
         return;
     }
 
-    // Require a slight delay/movement before starting drag (prevents accidental drags)
+    // Store touched element and position
     touchedElement = e.currentTarget;
     touchedItemId = e.currentTarget.dataset.itemId;
     touchedListId = e.currentTarget.dataset.listId;
@@ -1041,14 +1043,35 @@ function handleItemTouchStart(e) {
     touchStartY = touch.clientY;
 
     isDragging = false;
+    hasMoved = false;
 
-    // Add visual feedback after a short delay
-    setTimeout(() => {
-        if (touchedElement && !isDragging) {
+    // Clear any existing timeout
+    if (longPressTimeout) {
+        clearTimeout(longPressTimeout);
+    }
+
+    // Require a long press (500ms) to activate drag mode
+    longPressTimeout = setTimeout(() => {
+        // Only activate if user hasn't moved significantly
+        if (touchedElement && !hasMoved) {
             isDragging = true;
             touchedElement.classList.add('dragging');
+
+            // Haptic feedback if available
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+
+            // Visual feedback with scale animation
+            touchedElement.style.transition = 'transform 0.1s ease';
+            touchedElement.style.transform = 'scale(1.05)';
+            setTimeout(() => {
+                if (touchedElement) {
+                    touchedElement.style.transform = '';
+                }
+            }, 100);
         }
-    }, 150);
+    }, 500);
 }
 
 function handleItemTouchMove(e) {
@@ -1058,14 +1081,26 @@ function handleItemTouchMove(e) {
     const deltaX = Math.abs(touch.clientX - touchStartX);
     const deltaY = Math.abs(touch.clientY - touchStartY);
 
-    // Only start dragging if moved more than 10px
-    if (deltaX > 10 || deltaY > 10) {
-        isDragging = true;
-        touchedElement.classList.add('dragging');
-        e.preventDefault(); // Prevent scrolling while dragging
+    // Check if user has moved significantly during long press delay
+    if (!isDragging && (deltaX > 15 || deltaY > 15)) {
+        // User is scrolling, cancel the long press
+        hasMoved = true;
+        if (longPressTimeout) {
+            clearTimeout(longPressTimeout);
+            longPressTimeout = null;
+        }
+        // Allow normal scrolling
+        touchedElement = null;
+        touchedItemId = null;
+        touchedListId = null;
+        return;
     }
 
+    // Only handle drag operations if drag mode is active
     if (!isDragging) return;
+
+    // Prevent scrolling while actively dragging
+    e.preventDefault();
 
     // Find element under touch point
     const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
@@ -1088,6 +1123,12 @@ function handleItemTouchMove(e) {
 }
 
 async function handleItemTouchEnd(e) {
+    // Clear long press timeout if still running
+    if (longPressTimeout) {
+        clearTimeout(longPressTimeout);
+        longPressTimeout = null;
+    }
+
     if (!touchedElement) return;
 
     touchedElement.classList.remove('dragging');
@@ -1102,6 +1143,7 @@ async function handleItemTouchEnd(e) {
         touchedItemId = null;
         touchedListId = null;
         currentDropTarget = null;
+        hasMoved = false;
         return;
     }
 
@@ -1167,12 +1209,15 @@ async function handleItemTouchEnd(e) {
     touchedListId = null;
     isDragging = false;
     currentDropTarget = null;
+    hasMoved = false;
 }
 
 // Touch handlers for list card reordering
 let touchedListCard = null;
 let touchedListCardId = null;
 let listDragging = false;
+let listLongPressTimeout = null;
+let listHasMoved = false;
 
 function handleListCardTouchStart(e) {
     // Don't drag if touching buttons or inputs
@@ -1188,13 +1233,35 @@ function handleListCardTouchStart(e) {
     touchStartY = touch.clientY;
 
     listDragging = false;
+    listHasMoved = false;
 
-    setTimeout(() => {
-        if (touchedListCard && !listDragging) {
+    // Clear any existing timeout
+    if (listLongPressTimeout) {
+        clearTimeout(listLongPressTimeout);
+    }
+
+    // Require a long press (500ms) to activate drag mode for lists
+    listLongPressTimeout = setTimeout(() => {
+        // Only activate if user hasn't moved significantly
+        if (touchedListCard && !listHasMoved) {
             listDragging = true;
             touchedListCard.classList.add('dragging');
+
+            // Haptic feedback if available
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+
+            // Visual feedback with scale animation
+            touchedListCard.style.transition = 'transform 0.1s ease';
+            touchedListCard.style.transform = 'scale(1.02)';
+            setTimeout(() => {
+                if (touchedListCard) {
+                    touchedListCard.style.transform = '';
+                }
+            }, 100);
         }
-    }, 200);
+    }, 500);
 }
 
 function handleListCardTouchMove(e) {
@@ -1204,12 +1271,25 @@ function handleListCardTouchMove(e) {
     const deltaX = Math.abs(touch.clientX - touchStartX);
     const deltaY = Math.abs(touch.clientY - touchStartY);
 
-    if (deltaX > 10 || deltaY > 10) {
-        listDragging = true;
-        e.preventDefault();
+    // Check if user has moved significantly during long press delay
+    if (!listDragging && (deltaX > 15 || deltaY > 15)) {
+        // User is scrolling, cancel the long press
+        listHasMoved = true;
+        if (listLongPressTimeout) {
+            clearTimeout(listLongPressTimeout);
+            listLongPressTimeout = null;
+        }
+        // Allow normal scrolling
+        touchedListCard = null;
+        touchedListCardId = null;
+        return;
     }
 
+    // Only handle drag operations if drag mode is active
     if (!listDragging) return;
+
+    // Prevent scrolling while actively dragging
+    e.preventDefault();
 
     const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
     const dropTarget = elementBelow?.closest('.list-card');
@@ -1224,6 +1304,12 @@ function handleListCardTouchMove(e) {
 }
 
 async function handleListCardTouchEnd(e) {
+    // Clear long press timeout if still running
+    if (listLongPressTimeout) {
+        clearTimeout(listLongPressTimeout);
+        listLongPressTimeout = null;
+    }
+
     if (!touchedListCard) return;
 
     touchedListCard.classList.remove('dragging');
@@ -1234,6 +1320,7 @@ async function handleListCardTouchEnd(e) {
     if (!listDragging) {
         touchedListCard = null;
         touchedListCardId = null;
+        listHasMoved = false;
         return;
     }
 
@@ -1267,6 +1354,7 @@ async function handleListCardTouchEnd(e) {
     touchedListCard = null;
     touchedListCardId = null;
     listDragging = false;
+    listHasMoved = false;
 }
 
 // Search
