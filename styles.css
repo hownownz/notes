@@ -295,11 +295,23 @@ body {
     margin-bottom: 16px;
     overflow: hidden;
     box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s;
+    transition: box-shadow 0.2s, transform 0.2s;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
 }
 
 .list-card:hover {
     box-shadow: var(--shadow-md);
+}
+
+.list-card.dragging {
+    opacity: 0.95;
+    transform: scale(1.02) rotate(1deg);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    border: 2px solid var(--primary-color);
 }
 
 .list-header {
@@ -407,8 +419,13 @@ body {
     padding: 14px 20px;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-primary);
-    transition: background 0.2s;
+    transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
     cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    touch-action: none;
 }
 
 .list-item:last-child {
@@ -420,8 +437,27 @@ body {
 }
 
 .list-item.dragging {
-    opacity: 0.5;
+    opacity: 0.9;
     cursor: grabbing;
+    transform: scale(1.05) rotate(2deg);
+    background: var(--primary-color);
+    color: white;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    border-radius: var(--radius-sm);
+}
+
+.list-item.dragging .item-text {
+    color: white;
+}
+
+.list-item.dragging .item-checkbox {
+    border-color: white;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.list-item.dragging .item-actions {
+    opacity: 0;
 }
 
 .item-select-checkbox {

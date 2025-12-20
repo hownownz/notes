@@ -1047,7 +1047,6 @@ function handleItemTouchStart(e) {
         if (touchedElement && !isDragging) {
             isDragging = true;
             touchedElement.classList.add('dragging');
-            touchedElement.style.opacity = '0.5';
         }
     }, 150);
 }
@@ -1092,7 +1091,6 @@ async function handleItemTouchEnd(e) {
     if (!touchedElement) return;
 
     touchedElement.classList.remove('dragging');
-    touchedElement.style.opacity = '';
 
     if (currentDropTarget) {
         currentDropTarget.classList.remove('drag-over', 'drag-over-list');
