@@ -1062,14 +1062,9 @@ function handleItemTouchStart(e) {
                 navigator.vibrate(50);
             }
 
-            // Visual feedback with scale animation
+            // Visual feedback - keep scaled until touch ends
             touchedElement.style.transition = 'transform 0.1s ease';
             touchedElement.style.transform = 'scale(1.05)';
-            setTimeout(() => {
-                if (touchedElement) {
-                    touchedElement.style.transform = '';
-                }
-            }, 100);
         }
     }, 500);
 }
@@ -1131,7 +1126,9 @@ async function handleItemTouchEnd(e) {
 
     if (!touchedElement) return;
 
+    // Clear visual feedback
     touchedElement.classList.remove('dragging');
+    touchedElement.style.transform = '';
 
     if (currentDropTarget) {
         currentDropTarget.classList.remove('drag-over', 'drag-over-list');
@@ -1252,14 +1249,9 @@ function handleListCardTouchStart(e) {
                 navigator.vibrate(50);
             }
 
-            // Visual feedback with scale animation
+            // Visual feedback - keep scaled until touch ends
             touchedListCard.style.transition = 'transform 0.1s ease';
             touchedListCard.style.transform = 'scale(1.02)';
-            setTimeout(() => {
-                if (touchedListCard) {
-                    touchedListCard.style.transform = '';
-                }
-            }, 100);
         }
     }, 500);
 }
@@ -1312,7 +1304,9 @@ async function handleListCardTouchEnd(e) {
 
     if (!touchedListCard) return;
 
+    // Clear visual feedback
     touchedListCard.classList.remove('dragging');
+    touchedListCard.style.transform = '';
     document.querySelectorAll('.list-card').forEach(card => {
         card.classList.remove('drag-over');
     });
