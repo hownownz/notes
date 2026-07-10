@@ -42,38 +42,37 @@ self.addEventListener('activate', event => {
 });
 
 // Fetch event - serve from cache, fallback to network
+// Only handle same-origin GET requests for our own app files. Everything
+// else (in particular Firestore's real-time Listen/Write streaming
+// requests) must pass through untouched - wrapping those breaks them.
 self.addEventListener('fetch', event => {
+  const request = event.request;
+
+  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request)
+    caches.match(request)
       .then(response => {
         // Cache hit - return response
         if (response) {
           return response;
         }
 
-        // Clone the request
-        const fetchRequest = event.request.clone();
-
-        return fetch(fetchRequest).then(response => {
+        return fetch(request.clone()).then(networkResponse => {
           // Check if valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
+          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+            return networkResponse;
           }
 
-          // Clone the response
-          const responseToCache = response.clone();
-
           // Cache the fetched response for future offline use
+          const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then(cache => {
-            // Don't cache Firebase URLs or external resources
-            if (!event.request.url.includes('firebasestorage') &&
-                !event.request.url.includes('googleapis') &&
-                !event.request.url.includes('gstatic')) {
-              cache.put(event.request, responseToCache);
-            }
+            cache.put(request, responseToCache);
           });
 
-          return response;
+          return networkResponse;
         }).catch(() => {
           // Network failed, check if we have a cached fallback
           return caches.match('./index.html');
