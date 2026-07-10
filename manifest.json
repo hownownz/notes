@@ -1,7 +1,7 @@
 {
-  "name": "Quick Capture Lists",
+  "name": "Quick Capture",
   "short_name": "QuickCapture",
-  "description": "Fast and simple list manager for capturing your thoughts and tasks",
+  "description": "Fast and simple note capture app",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",

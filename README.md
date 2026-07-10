@@ -1,25 +1,21 @@
-# Quick Capture Lists 📝
+# Quick Capture 📝
 
-A fast, clean, and simple list manager for capturing thoughts, tasks, and ideas. Built with vanilla JavaScript and Firebase.
+A fast, dead-simple note capture app. No lists, no folders — just add a note, tick it off when done, or remove it. Built with vanilla JavaScript and Firebase.
 
 ## Features
 
 ### Core Functionality
-- **Quick Capture**: Add items instantly with a single input at the top
-- **Multiple Custom Lists**: Create unlimited lists (Shopping, Home Tasks, Ideas, etc.)
-- **Collapsible Lists**: Keep your view clean by collapsing lists you're not using
-- **Strike-through Completion**: Click items to mark them complete with visual feedback
-- **Drag & Reorder**: Rearrange items within lists by dragging
+- **Quick Capture**: Add a note instantly with a single input at the top
+- **Tick Off**: Click a note to mark it complete with a strike-through
+- **Edit**: Add or update a comment/detail on any note after adding it
+- **Delete**: Remove notes whenever you want
 
 ### Smart Features
-- **Search Across All Lists**: Find any item quickly across all your lists
-- **Move Items Between Lists**: Easily reorganize items to different lists
-- **Edit Items Inline**: Update item text or move to another list
-- **Bulk Actions**: Complete or delete multiple items at once
-- **Clear Completed**: Remove finished items to keep lists clean
+- **Search**: Find any note by its text or comment
+- **Clear Completed**: Remove all ticked-off notes in one go
 
 ### Technical Features
-- **Real-time Sync**: Changes sync instantly across all devices
+- **Real-time Sync**: Changes sync instantly across all your devices (phone, desktop, etc.)
 - **Offline Support**: Works offline, syncs when reconnected
 - **Secure Authentication**: Email/password login via Firebase Auth
 - **Cloud Storage**: All data stored securely in Firebase Firestore
@@ -62,32 +58,25 @@ For detailed setup instructions, see [SETUP.md](SETUP.md)
 
 ## Usage
 
-### Creating a List
-1. Click "+ New List" button
-2. Enter list name (e.g., "Shopping", "Home Tasks", "Ideas")
-3. Choose an emoji icon
-4. Click "Save"
+### Adding Notes
+1. Type your note in the box at the top
+2. Press Enter or click the "+" button
 
-### Adding Items
-1. Type your item in the quick-add box at the top
-2. Select which list to add it to
-3. Press Enter or click the "+" button
-
-### Managing Items
-- **Complete**: Click the checkbox or item text to strike through
-- **Edit**: Click the pencil icon to edit text or move to another list
-- **Delete**: Click the X icon to remove
-- **Reorder**: Drag items up/down to reorder
-
-### Organizing Lists
-- **Collapse**: Click list header to collapse/expand
-- **Edit**: Click pencil icon in list header
-- **Delete**: Click trash icon in list header
+### Managing Notes
+- **Complete**: Click the checkbox or note text to strike through
+- **Edit**: Click the pencil icon to change the text or add a comment/detail
+- **Delete**: Click the ✕ icon, or delete from within the edit screen
 
 ### Search
-- Click the search icon (🔍) in header
-- Type to search across all lists
-- Click a result to jump to that item
+- Click the search icon (🔍) in the header
+- Type to search note text and comments
+- Click a result to jump to that note
+
+## Upgrading From an Older Version
+
+This app used to be organized around named lists (Shopping, Home Tasks, etc). That model has been replaced with a single flat feed of notes, since lists turned out to add more overhead than value for day-to-day capture.
+
+The first time you sign in after this update, the app automatically copies every item from your old lists into the new flat notes feed (a one-time migration). Your original list data is **not deleted** — it's left in Firestore untouched as a backup, just no longer shown in the app.
 
 ## Technology Stack
 
@@ -113,6 +102,16 @@ notes/
 └── .gitignore          # Git ignore rules
 ```
 
+## Data Model
+
+Each note is its own Firestore document under `users/{uid}/items/{itemId}`:
+
+```
+{
+  id, text, comment, completed, createdAt, updatedAt
+}
+```
+
 ## Browser Support
 
 - Chrome/Edge (latest)
@@ -130,19 +129,7 @@ notes/
 ## Export/Import
 
 - **Export**: Settings → Export All Data (JSON format)
-- **Import**: Feature coming soon
-
-## Planned Features
-
-- [ ] Share lists with other users
-- [ ] Bulk import/export
-- [ ] List templates
-- [ ] Recurring items
-- [ ] Item notes/details
-- [ ] Color-coded lists
-- [ ] List sorting options
-- [ ] Keyboard shortcuts
-- [ ] Dark mode toggle
+- **Import**: Settings → Import Data (JSON format)
 
 ## Contributing
 
@@ -151,10 +138,6 @@ This is a personal project, but suggestions and feedback are welcome!
 ## License
 
 MIT License - feel free to use and modify as needed.
-
-## Acknowledgments
-
-Based on the architecture of the Shopping Planner project, adapted for general list management.
 
 ---
 

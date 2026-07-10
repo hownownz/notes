@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Quick Capture Lists</title>
+    <title>Quick Capture</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -15,7 +15,6 @@
             <h1>📝 Quick Capture</h1>
             <div class="header-actions">
                 <button id="searchBtn" class="icon-btn" title="Search">🔍</button>
-                <button id="selectionModeBtn" class="icon-btn" title="Selection Mode">☑️</button>
                 <button id="darkModeBtn" class="icon-btn" title="Toggle Dark Mode">🌙</button>
                 <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
                 <button id="logoutBtn" class="icon-btn" title="Logout">🚪</button>
@@ -29,15 +28,11 @@
             <input
                 type="text"
                 id="quickAddInput"
-                placeholder="Add item..."
+                placeholder="Add a note..."
                 autocomplete="off"
             >
-            <select id="listSelector" class="list-selector">
-                <option value="">Select list...</option>
-            </select>
             <button id="addItemBtn" class="add-btn">+</button>
         </div>
-        <button id="createListBtn" class="create-list-btn">+ New List</button>
     </div>
 
     <!-- Search Section (Hidden by default) -->
@@ -46,7 +41,7 @@
             <input
                 type="text"
                 id="searchInput"
-                placeholder="Search all lists..."
+                placeholder="Search notes..."
                 autocomplete="off"
             >
             <button id="closeSearchBtn" class="icon-btn">✕</button>
@@ -54,91 +49,40 @@
         <div id="searchResults" class="search-results"></div>
     </div>
 
-    <!-- Lists Container -->
-    <main class="lists-container" id="listsContainer">
-        <!-- Lists will be dynamically inserted here -->
+    <!-- Items Container -->
+    <main class="items-container" id="itemsContainer">
+        <!-- Items will be dynamically inserted here -->
     </main>
-
-    <!-- Modals -->
-
-    <!-- Create/Edit List Modal -->
-    <div id="listModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="listModalTitle">Create New List</h2>
-                <button class="close-modal">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="listNameInput">List Name</label>
-                    <input
-                        type="text"
-                        id="listNameInput"
-                        placeholder="e.g., Home Tasks, Shopping, Ideas..."
-                        autocomplete="off"
-                    >
-                </div>
-                <div class="form-group">
-                    <label for="listIconInput">Icon (emoji)</label>
-                    <input
-                        type="text"
-                        id="listIconInput"
-                        placeholder="📌"
-                        maxlength="2"
-                        autocomplete="off"
-                    >
-                </div>
-                <div class="form-group">
-                    <label for="listColorInput">Color</label>
-                    <input
-                        type="color"
-                        id="listColorInput"
-                        value="#3b82f6"
-                    >
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="cancelListBtn" class="btn-secondary">Cancel</button>
-                <button id="shareListBtn" class="btn-secondary" style="display: none;">🔗 Share List</button>
-                <button id="saveListBtn" class="btn-primary">Save</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Edit Item Modal -->
     <div id="editItemModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Edit Item</h2>
+                <h2>Edit Note</h2>
                 <button class="close-modal">✕</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label for="editItemInput">Item Text</label>
+                    <label for="editItemInput">Note</label>
                     <input
                         type="text"
                         id="editItemInput"
-                        placeholder="Item text..."
+                        placeholder="Note text..."
                         autocomplete="off"
                     >
                 </div>
                 <div class="form-group">
-                    <label for="editItemNotes">Notes (optional)</label>
+                    <label for="editItemComment">Comment (optional)</label>
                     <textarea
-                        id="editItemNotes"
-                        placeholder="Add details, notes, or context..."
+                        id="editItemComment"
+                        placeholder="Add details or context..."
                         rows="3"
                         autocomplete="off"
                     ></textarea>
                 </div>
-                <div class="form-group">
-                    <label for="moveToListSelect">Move to List</label>
-                    <select id="moveToListSelect" class="list-selector">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
             </div>
             <div class="modal-footer">
+                <button id="deleteEditItemBtn" class="btn-secondary">Delete</button>
                 <button id="cancelEditItemBtn" class="btn-secondary">Cancel</button>
                 <button id="saveEditItemBtn" class="btn-primary">Save</button>
             </div>
@@ -159,37 +103,15 @@
                 </div>
                 <div class="settings-section">
                     <h3>Data Management</h3>
-                    <div class="setting-item">
-                        <label class="toggle-label">
-                            <input type="checkbox" id="showArchivedToggle">
-                            <span>Show Archived Lists</span>
-                        </label>
-                    </div>
-                    <button id="joinSharedListBtn" class="btn-secondary full-width">📥 Join Shared List</button>
                     <button id="exportDataBtn" class="btn-secondary full-width">Export All Data (JSON)</button>
                     <button id="importDataBtn" class="btn-secondary full-width">Import Data (JSON)</button>
                     <input type="file" id="importFileInput" accept=".json" style="display: none;">
-                    <button id="clearCompletedBtn" class="btn-secondary full-width">Clear All Completed Items</button>
-                </div>
-                <div class="settings-section">
-                    <h3>Sharing</h3>
-                    <p class="hint">Share lists with other users (coming soon)</p>
+                    <button id="clearCompletedBtn" class="btn-secondary full-width">Clear Completed Notes</button>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="close-modal btn-secondary">Close</button>
             </div>
-        </div>
-    </div>
-
-    <!-- Bulk Actions Bar (Hidden by default) -->
-    <div id="bulkActionsBar" class="bulk-actions-bar" style="display: none;">
-        <span id="selectedCount">0 selected</span>
-        <div class="bulk-actions">
-            <button id="bulkCompleteBtn" class="bulk-btn">✓ Complete</button>
-            <button id="bulkDeleteBtn" class="bulk-btn">✕ Delete</button>
-            <button id="bulkMoveBtn" class="bulk-btn">→ Move</button>
-            <button id="cancelBulkBtn" class="bulk-btn">Cancel</button>
         </div>
     </div>
 

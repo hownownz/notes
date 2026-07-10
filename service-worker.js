@@ -1,5 +1,5 @@
-// Service Worker for Quick Capture Lists PWA
-const CACHE_NAME = 'quick-capture-v1';
+// Service Worker for Quick Capture PWA
+const CACHE_NAME = 'quick-capture-v2';
 const urlsToCache = [
   '/',
   '/index.html',

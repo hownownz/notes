@@ -200,26 +200,17 @@ If you're **not** familiar with Git, use GitHub's web interface:
 3. Click **"Create Account"**
 4. You should be redirected to the main app
 
-### Step 3: Create Your First List
+### Step 3: Add a Note
 
-1. Click **"+ New List"**
-2. Name: "Test List"
-3. Icon: 📋
-4. Click **"Save"**
+1. Type "Test note" in the input at the top
+2. Press Enter or click "+"
+3. The note should appear below
 
-### Step 4: Add Items
+### Step 4: Test Features
 
-1. Select "📋 Test List" in the dropdown
-2. Type "Test item" in the input
-3. Press Enter or click "+"
-4. Item should appear in your list
-
-### Step 5: Test Features
-
-- ✓ Click item to mark complete
-- ✏️ Click edit icon to modify
-- 🗑️ Click X to delete
-- Click list header to collapse/expand
+- ✓ Click the note (or its checkbox) to mark complete
+- ✏️ Click the pencil icon to edit the text or add a comment
+- ✕ Click the ✕ icon to delete
 
 ---
 
@@ -293,7 +284,7 @@ Check out the "Planned Features" section in `README.md` for ideas!
 
 ### Backup Your Data
 
-Use the **Settings → Export All Data** feature regularly to backup your lists.
+Use the **Settings → Export All Data** feature regularly to backup your notes.
 
 ---
 
@@ -312,9 +303,6 @@ A: Firebase free tier is generous - likely free for personal use. GitHub Pages i
 
 **Q: Can I use my own domain?**
 A: Yes! Configure a custom domain in GitHub Pages settings, then add it to Firebase Authorized Domains.
-
-**Q: How do I share lists with others?**
-A: This feature is planned but not yet implemented.
 
 ### Need More Help?
 
@@ -336,7 +324,7 @@ A: This feature is planned but not yet implemented.
 - [ ] Pushed code to GitHub
 - [ ] Enabled GitHub Pages
 - [ ] Added GitHub Pages domain to Firebase
-- [ ] Tested login and list creation
+- [ ] Tested login and adding a note
 - [ ] App is working correctly
 
 **Congratulations! Your Quick Capture Lists app is now live! 🎉**

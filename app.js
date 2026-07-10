@@ -2,28 +2,15 @@
 import * as FirebaseService from './firebase-service.js';
 
 // State
-let currentLists = [];
-let currentEditingList = null;
+let currentItems = [];
 let currentEditingItem = null;
-let currentItemListId = null;
-let showArchivedLists = false;
-let collapsedLists = new Set();
-let selectedItems = new Map(); // Map of listId -> Set of itemIds
-let listFilters = new Map(); // Map of listId -> filter type ('all', 'incomplete', 'completed')
-let isSelectionMode = false; // Whether we're in selection mode for bulk actions
-let draggedElement = null;
-let draggedItemId = null;
-let draggedListId = null;
 
 // DOM Elements
 const loadingIndicator = document.getElementById('loadingIndicator');
-const listsContainer = document.getElementById('listsContainer');
+const itemsContainer = document.getElementById('itemsContainer');
 const quickAddInput = document.getElementById('quickAddInput');
-const listSelector = document.getElementById('listSelector');
 const addItemBtn = document.getElementById('addItemBtn');
-const createListBtn = document.getElementById('createListBtn');
 const searchBtn = document.getElementById('searchBtn');
-const selectionModeBtn = document.getElementById('selectionModeBtn');
 const darkModeBtn = document.getElementById('darkModeBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const logoutBtn = document.getElementById('logoutBtn');
@@ -33,46 +20,28 @@ const closeSearchBtn = document.getElementById('closeSearchBtn');
 const searchResults = document.getElementById('searchResults');
 const toast = document.getElementById('toast');
 
-// Bulk Actions
-const bulkActionsBar = document.getElementById('bulkActionsBar');
-const selectedCount = document.getElementById('selectedCount');
-const bulkCompleteBtn = document.getElementById('bulkCompleteBtn');
-const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
-const bulkMoveBtn = document.getElementById('bulkMoveBtn');
-const cancelBulkBtn = document.getElementById('cancelBulkBtn');
-
-// Modals
-const listModal = document.getElementById('listModal');
-const listModalTitle = document.getElementById('listModalTitle');
-const listNameInput = document.getElementById('listNameInput');
-const listIconInput = document.getElementById('listIconInput');
-const listColorInput = document.getElementById('listColorInput');
-const saveListBtn = document.getElementById('saveListBtn');
-const cancelListBtn = document.getElementById('cancelListBtn');
-const shareListBtn = document.getElementById('shareListBtn');
-
+// Edit Modal
 const editItemModal = document.getElementById('editItemModal');
 const editItemInput = document.getElementById('editItemInput');
-const editItemNotes = document.getElementById('editItemNotes');
-const moveToListSelect = document.getElementById('moveToListSelect');
+const editItemComment = document.getElementById('editItemComment');
 const saveEditItemBtn = document.getElementById('saveEditItemBtn');
 const cancelEditItemBtn = document.getElementById('cancelEditItemBtn');
+const deleteEditItemBtn = document.getElementById('deleteEditItemBtn');
 
+// Settings Modal
 const settingsModal = document.getElementById('settingsModal');
 const userEmail = document.getElementById('userEmail');
 const exportDataBtn = document.getElementById('exportDataBtn');
 const importDataBtn = document.getElementById('importDataBtn');
 const importFileInput = document.getElementById('importFileInput');
 const clearCompletedBtn = document.getElementById('clearCompletedBtn');
-const joinSharedListBtn = document.getElementById('joinSharedListBtn');
-const showArchivedToggle = document.getElementById('showArchivedToggle');
 
 // Initialize App
 FirebaseService.initAuth(
-    (user) => {
+    async (user) => {
         // User signed in
-        console.log('User signed in:', user.email);
         userEmail.textContent = user.email;
+        await runMigrationIfNeeded();
         initializeApp();
     },
     () => {
@@ -81,18 +50,29 @@ FirebaseService.initAuth(
     }
 );
 
+async function runMigrationIfNeeded() {
+    const flag = 'migratedToFlatItems_v1';
+    if (localStorage.getItem(flag)) return;
+
+    try {
+        const count = await FirebaseService.migrateListsToFlatItems();
+        if (count > 0) {
+            showToast(`Imported ${count} note(s) from your old lists`, 'success');
+        }
+    } catch (error) {
+        console.error('Error migrating old lists:', error);
+    } finally {
+        localStorage.setItem(flag, 'true');
+    }
+}
+
 function initializeApp() {
     hideLoading();
     setupEventListeners();
-    subscribeToLists();
-
-    // Load collapsed state from localStorage
-    const savedCollapsed = localStorage.getItem('collapsedLists');
-    if (savedCollapsed) {
-        collapsedLists = new Set(JSON.parse(savedCollapsed));
-    }
-
-    // Initialize dark mode
+    FirebaseService.subscribeToItems((items) => {
+        currentItems = items;
+        renderItems();
+    });
     initializeDarkMode();
 }
 
@@ -128,16 +108,10 @@ function setupEventListeners() {
         if (e.key === 'Enter') handleQuickAdd();
     });
 
-    // Create List
-    createListBtn.addEventListener('click', () => openCreateListModal());
-
     // Search
     searchBtn.addEventListener('click', toggleSearch);
     closeSearchBtn.addEventListener('click', toggleSearch);
     searchInput.addEventListener('input', handleSearch);
-
-    // Selection Mode
-    selectionModeBtn.addEventListener('click', toggleSelectionMode);
 
     // Dark Mode
     darkModeBtn.addEventListener('click', toggleDarkMode);
@@ -147,27 +121,15 @@ function setupEventListeners() {
     exportDataBtn.addEventListener('click', handleExportData);
     importDataBtn.addEventListener('click', handleImportData);
     importFileInput.addEventListener('change', handleImportFileSelected);
-    clearCompletedBtn.addEventListener('click', handleClearAllCompleted);
-    joinSharedListBtn.addEventListener('click', handleJoinSharedList);
-    showArchivedToggle.addEventListener('change', handleToggleArchivedLists);
+    clearCompletedBtn.addEventListener('click', handleClearCompleted);
 
     // Logout
     logoutBtn.addEventListener('click', handleLogout);
 
-    // Bulk Actions
-    bulkCompleteBtn.addEventListener('click', handleBulkComplete);
-    bulkDeleteBtn.addEventListener('click', handleBulkDelete);
-    bulkMoveBtn.addEventListener('click', handleBulkMove);
-    cancelBulkBtn.addEventListener('click', clearSelection);
-
-    // List Modal
-    saveListBtn.addEventListener('click', handleSaveList);
-    cancelListBtn.addEventListener('click', () => closeModal(listModal));
-    shareListBtn.addEventListener('click', handleShareList);
-
     // Edit Item Modal
     saveEditItemBtn.addEventListener('click', handleSaveEditItem);
     cancelEditItemBtn.addEventListener('click', () => closeModal(editItemModal));
+    deleteEditItemBtn.addEventListener('click', handleDeleteFromEditModal);
 
     // Close modals with X button
     document.querySelectorAll('.close-modal').forEach(btn => {
@@ -188,14 +150,7 @@ function setupEventListeners() {
 
     // Keyboard Shortcuts
     document.addEventListener('keydown', (e) => {
-        // Check if user is typing in an input/textarea
         const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
-
-        // Ctrl/Cmd + N: Create new list
-        if ((e.ctrlKey || e.metaKey) && e.key === 'n' && !isTyping) {
-            e.preventDefault();
-            openCreateListModal();
-        }
 
         // Ctrl/Cmd + F: Open search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -215,10 +170,7 @@ function setupEventListeners() {
 
         // Escape: Close modals/search
         if (e.key === 'Escape') {
-            // Close any open modal
-            if (listModal.classList.contains('active')) {
-                closeModal(listModal);
-            } else if (editItemModal.classList.contains('active')) {
+            if (editItemModal.classList.contains('active')) {
                 closeModal(editItemModal);
             } else if (settingsModal.classList.contains('active')) {
                 closeModal(settingsModal);
@@ -235,252 +187,34 @@ function setupEventListeners() {
     });
 }
 
-// Firebase Listeners
-function subscribeToLists() {
-    FirebaseService.subscribeToLists((lists) => {
-        currentLists = lists;
-        renderLists();
-        updateListSelector();
-    }, showArchivedLists);
-}
-
 // Rendering
-function renderLists() {
-    if (currentLists.length === 0) {
-        renderNoListsState();
+function renderItems() {
+    if (currentItems.length === 0) {
+        renderEmptyState();
         return;
     }
 
-    listsContainer.innerHTML = '';
-
-    currentLists.forEach(list => {
-        const listCard = createListCard(list);
-        listsContainer.appendChild(listCard);
-    });
-
-    // Reapply drag and drop
-    setupDragAndDrop();
+    itemsContainer.innerHTML = currentItems.map(renderItem).join('');
 }
 
-function renderNoListsState() {
-    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
-
-    listsContainer.innerHTML = `
-        <div class="no-lists-state">
-            <div class="no-lists-state-icon">📝</div>
-            <h2>${hasSeenWelcome ? 'No Lists Yet' : 'Welcome to Quick Capture!'}</h2>
-            <p>${hasSeenWelcome ? 'Create your first list to get started!' : 'Organize your tasks, shopping, and ideas with fast, simple lists.'}</p>
-            ${!hasSeenWelcome ? `
-                <div class="welcome-actions">
-                    <button id="createSampleListsBtn" class="btn-primary" style="margin: 20px auto; display: block;">
-                        Create Sample Lists
-                    </button>
-                    <button id="skipWelcomeBtn" class="btn-secondary" style="margin: 10px auto; display: block;">
-                        Start from Scratch
-                    </button>
-                </div>
-            ` : ''}
+function renderEmptyState() {
+    itemsContainer.innerHTML = `
+        <div class="empty-state">
+            <div class="empty-state-icon">📝</div>
+            <h2>No notes yet</h2>
+            <p>Add your first note above!</p>
         </div>
     `;
-
-    if (!hasSeenWelcome) {
-        document.getElementById('createSampleListsBtn')?.addEventListener('click', createSampleLists);
-        document.getElementById('skipWelcomeBtn')?.addEventListener('click', () => {
-            localStorage.setItem('hasSeenWelcome', 'true');
-            renderLists();
-        });
-    }
 }
 
-async function createSampleLists() {
-    try {
-        const sampleLists = [
-            { name: 'Shopping', icon: '🛒', color: '#10b981', items: ['Milk', 'Bread', 'Eggs'] },
-            { name: 'Home Tasks', icon: '🏠', color: '#3b82f6', items: ['Clean kitchen', 'Water plants'] },
-            { name: 'Ideas', icon: '💡', color: '#f59e0b', items: ['Weekend project ideas'] }
-        ];
-
-        for (let i = 0; i < sampleLists.length; i++) {
-            const sampleList = sampleLists[i];
-            await FirebaseService.createList({
-                name: sampleList.name,
-                icon: sampleList.icon,
-                color: sampleList.color,
-                order: i
-            });
-
-            // Wait for list to be created then add items
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Get the created list ID
-            const lists = await FirebaseService.getAllLists();
-            const createdList = lists.find(l => l.name === sampleList.name);
-
-            if (createdList && sampleList.items) {
-                for (const itemText of sampleList.items) {
-                    await FirebaseService.addItem(createdList.id, { text: itemText });
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                }
-            }
-        }
-
-        localStorage.setItem('hasSeenWelcome', 'true');
-        showToast('Sample lists created!', 'success');
-    } catch (error) {
-        console.error('Error creating sample lists:', error);
-        showToast('Failed to create sample lists', 'error');
-    }
-}
-
-function createListCard(list) {
-    const isCollapsed = collapsedLists.has(list.id);
-    const completedCount = list.items.filter(item => item.completed).length;
-    const totalCount = list.items.length;
-
-    const card = document.createElement('div');
-    card.className = `list-card ${isCollapsed ? 'collapsed' : ''} ${list.archived ? 'archived' : ''}`;
-    card.dataset.listId = list.id;
-
-    // Apply color if set
-    if (list.color) {
-        card.style.borderLeftColor = list.color;
-        card.style.borderLeftWidth = '4px';
-    }
-
-    card.innerHTML = `
-        <div class="list-header" data-list-id="${list.id}">
-            <div class="list-header-left">
-                <span class="list-icon">${list.icon}</span>
-                <div class="list-title-container">
-                    <div class="list-title">
-                        ${escapeHtml(list.name)}
-                        ${list.isShared ? '<span class="shared-badge" title="Shared list - collaborative">🔗</span>' : ''}
-                        ${list.archived ? '<span class="archived-badge" title="Archived">📦</span>' : ''}
-                    </div>
-                    <div class="list-count">${completedCount}/${totalCount} completed</div>
-                </div>
-            </div>
-            <div class="list-header-right">
-                <div class="list-actions">
-                    ${!list.archived ? `
-                        <button class="list-action-btn filter" data-action="cycle-filter" title="Filter: All">🔽</button>
-                        <button class="list-action-btn edit" data-action="edit-list" title="Edit list">✏️</button>
-                        <button class="list-action-btn archive" data-action="archive-list" title="Archive list">📦</button>
-                    ` : `
-                        <button class="list-action-btn restore" data-action="restore-list" title="Restore list">↩️</button>
-                        <button class="list-action-btn delete" data-action="delete-list" title="Delete permanently">🗑️</button>
-                    `}
-                </div>
-                <span class="collapse-icon">▼</span>
-            </div>
-        </div>
-        <div class="list-items" data-list-id="${list.id}">
-            ${list.items.length === 0 ? renderEmptyListState() : renderItems(list.items, list.id)}
-        </div>
-    `;
-
-    // Event Listeners for List Card
-    const header = card.querySelector('.list-header');
-    header.addEventListener('click', (e) => {
-        // Don't collapse if clicking on action buttons
-        if (e.target.closest('.list-action-btn')) return;
-        toggleListCollapse(list.id);
-    });
-
-    // Cycle Filter (only for non-archived lists)
-    const filterBtn = card.querySelector('[data-action="cycle-filter"]');
-    if (filterBtn) {
-        filterBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            cycleListFilter(list.id);
-        });
-    }
-
-    // Edit List (only for non-archived lists)
-    const editBtn = card.querySelector('[data-action="edit-list"]');
-    if (editBtn) {
-        editBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openEditListModal(list);
-        });
-    }
-
-    // Archive List
-    const archiveBtn = card.querySelector('[data-action="archive-list"]');
-    if (archiveBtn) {
-        archiveBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            handleArchiveList(list.id, list.name);
-        });
-    }
-
-    // Restore List
-    const restoreBtn = card.querySelector('[data-action="restore-list"]');
-    if (restoreBtn) {
-        restoreBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            handleUnarchiveList(list.id, list.name);
-        });
-    }
-
-    // Delete List (permanently)
-    const deleteBtn = card.querySelector('[data-action="delete-list"]');
-    if (deleteBtn) {
-        deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            handleDeleteList(list.id, list.name);
-        });
-    }
-
-    return card;
-}
-
-function cycleListFilter(listId) {
-    const currentFilter = listFilters.get(listId) || 'all';
-    const filters = ['all', 'incomplete', 'completed'];
-    const currentIndex = filters.indexOf(currentFilter);
-    const nextIndex = (currentIndex + 1) % filters.length;
-    const nextFilter = filters[nextIndex];
-
-    listFilters.set(listId, nextFilter);
-    renderLists();
-
-    const filterLabels = { 'all': 'All', 'incomplete': 'Incomplete', 'completed': 'Completed' };
-    showToast(`Filter: ${filterLabels[nextFilter]}`, 'success');
-}
-
-function renderEmptyListState() {
-    return '<div class="empty-list">No items yet. Add one above!</div>';
-}
-
-function renderItems(items, listId) {
-    // Get filter for this list
-    const filter = listFilters.get(listId) || 'all';
-
-    // Filter items based on filter setting
-    let filteredItems = items;
-    if (filter === 'incomplete') {
-        filteredItems = items.filter(item => !item.completed);
-    } else if (filter === 'completed') {
-        filteredItems = items.filter(item => item.completed);
-    }
-
-    // Sort items by order
-    const sortedItems = [...filteredItems].sort((a, b) => a.order - b.order);
-
-    return sortedItems.map(item => {
-        const isSelected = selectedItems.get(listId)?.has(item.id) || false;
-        const hasNotes = item.notes && item.notes.trim().length > 0;
-        return `
-        <div class="list-item ${item.completed ? 'completed' : ''} ${isSelected ? 'selected' : ''} ${isSelectionMode ? 'selection-mode' : ''}"
-             data-item-id="${item.id}"
-             data-list-id="${listId}"
-             draggable="true">
-            ${isSelectionMode ? `<input type="checkbox" class="item-select-checkbox" data-action="select-item" ${isSelected ? 'checked' : ''}>` : ''}
+function renderItem(item) {
+    const hasComment = item.comment && item.comment.trim().length > 0;
+    return `
+        <div class="item-row ${item.completed ? 'completed' : ''}" data-item-id="${item.id}">
             <div class="item-checkbox" data-action="toggle-item"></div>
-            <div class="item-text" data-action="${isSelectionMode ? 'select-item' : 'toggle-item'}">
-                ${escapeHtml(item.text)}
-                ${hasNotes ? '<span class="has-notes-indicator" title="Has notes">📝</span>' : ''}
+            <div class="item-body" data-action="toggle-item">
+                <div class="item-text">${escapeHtml(item.text)}</div>
+                ${hasComment ? `<div class="item-comment">${escapeHtml(item.comment)}</div>` : ''}
             </div>
             <div class="item-actions">
                 <button class="item-action-btn" data-action="edit-item" title="Edit">✏️</button>
@@ -488,256 +222,47 @@ function renderItems(items, listId) {
             </div>
         </div>
     `;
-    }).join('');
-}
-
-function updateListSelector() {
-    const currentValue = listSelector.value;
-
-    listSelector.innerHTML = '<option value="">Select list...</option>';
-
-    currentLists.forEach(list => {
-        const option = document.createElement('option');
-        option.value = list.id;
-        option.textContent = `${list.icon} ${list.name}`;
-        listSelector.appendChild(option);
-    });
-
-    // Restore selection if still valid
-    if (currentValue && currentLists.some(l => l.id === currentValue)) {
-        listSelector.value = currentValue;
-    }
-
-    // Update move-to list selector in edit modal
-    moveToListSelect.innerHTML = '';
-    currentLists.forEach(list => {
-        const option = document.createElement('option');
-        option.value = list.id;
-        option.textContent = `${list.icon} ${list.name}`;
-        moveToListSelect.appendChild(option);
-    });
 }
 
 // Quick Add
 async function handleQuickAdd() {
     const text = quickAddInput.value.trim();
-    const listId = listSelector.value;
 
     if (!text) {
-        showToast('Please enter item text', 'warning');
-        return;
-    }
-
-    if (!listId) {
-        showToast('Please select a list', 'warning');
+        showToast('Please enter a note', 'warning');
         return;
     }
 
     try {
-        await FirebaseService.addItem(listId, { text });
+        await FirebaseService.addItem({ text });
         quickAddInput.value = '';
         quickAddInput.focus();
-        showToast('Item added!', 'success');
     } catch (error) {
         console.error('Error adding item:', error);
-        showToast('Failed to add item', 'error');
-    }
-}
-
-// List Management
-function openCreateListModal() {
-    currentEditingList = null;
-    listModalTitle.textContent = 'Create New List';
-    listNameInput.value = '';
-    listIconInput.value = '📌';
-    listColorInput.value = '#3b82f6';
-    shareListBtn.style.display = 'none'; // Hide share button for new lists
-    openModal(listModal);
-    listNameInput.focus();
-}
-
-function openEditListModal(list) {
-    currentEditingList = list;
-    listModalTitle.textContent = 'Edit List';
-    listNameInput.value = list.name;
-    listIconInput.value = list.icon;
-    listColorInput.value = list.color || '#3b82f6';
-
-    // Show share button for existing lists, update text if already shared
-    if (list.isShared) {
-        shareListBtn.textContent = '🔗 Copy Share ID';
-        shareListBtn.style.display = 'inline-block';
-    } else {
-        shareListBtn.textContent = '🔗 Share List';
-        shareListBtn.style.display = 'inline-block';
-    }
-
-    openModal(listModal);
-    listNameInput.focus();
-}
-
-async function handleSaveList() {
-    const name = listNameInput.value.trim();
-    const icon = listIconInput.value.trim() || '📌';
-    const color = listColorInput.value;
-
-    if (!name) {
-        showToast('Please enter a list name', 'warning');
-        return;
-    }
-
-    try {
-        if (currentEditingList) {
-            // Update existing list
-            await FirebaseService.updateList(currentEditingList.id, { name, icon, color });
-            showToast('List updated!', 'success');
-        } else {
-            // Create new list
-            await FirebaseService.createList({
-                name,
-                icon,
-                color,
-                order: currentLists.length
-            });
-            showToast('List created!', 'success');
-        }
-
-        closeModal(listModal);
-    } catch (error) {
-        console.error('Error saving list:', error);
-        showToast('Failed to save list', 'error');
-    }
-}
-
-async function handleDeleteList(listId, listName) {
-    const confirmed = confirm(`Are you sure you want to delete "${listName}"? All items will be lost.`);
-    if (!confirmed) return;
-
-    try {
-        await FirebaseService.deleteList(listId);
-        collapsedLists.delete(listId);
-        saveCollapsedState();
-        showToast('List deleted', 'success');
-    } catch (error) {
-        console.error('Error deleting list:', error);
-        showToast('Failed to delete list', 'error');
-    }
-}
-
-async function handleShareList() {
-    if (!currentEditingList) return;
-
-    try {
-        let shareId;
-
-        if (currentEditingList.isShared) {
-            // Already shared, just copy the ID
-            shareId = currentEditingList.id;
-        } else {
-            // Convert to shared list
-            const confirmed = confirm(`Convert "${currentEditingList.name}" to a shared list?\n\nOnce shared, anyone with the Share ID can join and collaborate on this list.`);
-            if (!confirmed) return;
-
-            shareId = await FirebaseService.convertToSharedList(currentEditingList.id);
-            showToast('List converted to shared!', 'success');
-        }
-
-        // Copy ID to clipboard
-        await navigator.clipboard.writeText(shareId);
-        showToast('Share ID copied to clipboard!', 'success');
-
-        closeModal(listModal);
-    } catch (error) {
-        console.error('Error sharing list:', error);
-        showToast('Failed to share list', 'error');
-    }
-}
-
-async function handleJoinSharedList() {
-    const shareId = prompt('Enter the Share ID you received:');
-
-    if (!shareId || !shareId.trim()) {
-        return;
-    }
-
-    try {
-        await FirebaseService.joinSharedList(shareId.trim());
-        showToast('Successfully joined shared list!', 'success');
-        closeModal(settingsModal);
-    } catch (error) {
-        console.error('Error joining shared list:', error);
-        if (error.message.includes('already a member')) {
-            showToast('You are already a member of this list', 'warning');
-        } else if (error.message.includes('not found')) {
-            showToast('Shared list not found. Check the Share ID.', 'error');
-        } else {
-            showToast('Failed to join shared list', 'error');
-        }
-    }
-}
-
-function handleToggleArchivedLists() {
-    showArchivedLists = showArchivedToggle.checked;
-    // Re-subscribe to lists with new filter
-    subscribeToLists();
-}
-
-async function handleArchiveList(listId, listName) {
-    const confirmed = confirm(`Archive "${listName}"?\n\nArchived lists are hidden but can be restored later.`);
-    if (!confirmed) return;
-
-    try {
-        await FirebaseService.archiveList(listId);
-        collapsedLists.delete(listId);
-        saveCollapsedState();
-        showToast('List archived', 'success');
-    } catch (error) {
-        console.error('Error archiving list:', error);
-        showToast('Failed to archive list', 'error');
-    }
-}
-
-async function handleUnarchiveList(listId, listName) {
-    try {
-        await FirebaseService.unarchiveList(listId);
-        showToast(`"${listName}" restored!`, 'success');
-    } catch (error) {
-        console.error('Error unarchiving list:', error);
-        showToast('Failed to restore list', 'error');
+        showToast('Failed to add note', 'error');
     }
 }
 
 // Item Management
-async function handleToggleItem(listId, itemId) {
-    const list = currentLists.find(l => l.id === listId);
-    if (!list) return;
-
-    const item = list.items.find(i => i.id === itemId);
+async function handleToggleItem(itemId) {
+    const item = currentItems.find(i => i.id === itemId);
     if (!item) return;
 
     try {
-        await FirebaseService.updateItem(listId, itemId, {
-            completed: !item.completed
-        });
+        await FirebaseService.updateItem(itemId, { completed: !item.completed });
     } catch (error) {
         console.error('Error toggling item:', error);
-        showToast('Failed to update item', 'error');
+        showToast('Failed to update note', 'error');
     }
 }
 
-function openEditItemModal(listId, itemId) {
-    const list = currentLists.find(l => l.id === listId);
-    if (!list) return;
-
-    const item = list.items.find(i => i.id === itemId);
+function openEditItemModal(itemId) {
+    const item = currentItems.find(i => i.id === itemId);
     if (!item) return;
 
     currentEditingItem = item;
-    currentItemListId = listId;
-
     editItemInput.value = item.text;
-    editItemNotes.value = item.notes || '';
-    moveToListSelect.value = listId;
+    editItemComment.value = item.comment || '';
 
     openModal(editItemModal);
     editItemInput.focus();
@@ -745,748 +270,59 @@ function openEditItemModal(listId, itemId) {
 
 async function handleSaveEditItem() {
     const newText = editItemInput.value.trim();
-    const newNotes = editItemNotes.value.trim();
-    const newListId = moveToListSelect.value;
+    const newComment = editItemComment.value.trim();
 
     if (!newText) {
-        showToast('Please enter item text', 'warning');
+        showToast('Please enter note text', 'warning');
         return;
     }
 
     try {
-        // Check if moving to different list
-        if (newListId !== currentItemListId) {
-            // Update text and notes first, then move
-            await FirebaseService.updateItem(currentItemListId, currentEditingItem.id, { text: newText, notes: newNotes });
-            await FirebaseService.moveItem(currentItemListId, newListId, currentEditingItem.id);
-            showToast('Item moved and updated!', 'success');
-        } else {
-            // Just update text and notes
-            await FirebaseService.updateItem(currentItemListId, currentEditingItem.id, { text: newText, notes: newNotes });
-            showToast('Item updated!', 'success');
-        }
-
+        await FirebaseService.updateItem(currentEditingItem.id, { text: newText, comment: newComment });
         closeModal(editItemModal);
     } catch (error) {
         console.error('Error saving item:', error);
-        showToast('Failed to save item', 'error');
+        showToast('Failed to save note', 'error');
     }
 }
 
-async function handleDeleteItem(listId, itemId) {
+async function handleDeleteFromEditModal() {
+    if (!currentEditingItem) return;
+    await handleDeleteItem(currentEditingItem.id);
+    closeModal(editItemModal);
+}
+
+async function handleDeleteItem(itemId) {
     try {
-        await FirebaseService.deleteItem(listId, itemId);
-        showToast('Item deleted', 'success');
+        await FirebaseService.deleteItem(itemId);
     } catch (error) {
         console.error('Error deleting item:', error);
-        showToast('Failed to delete item', 'error');
+        showToast('Failed to delete note', 'error');
     }
-}
-
-// Bulk Selection and Actions
-function handleSelectItem(listId, itemId) {
-    if (!selectedItems.has(listId)) {
-        selectedItems.set(listId, new Set());
-    }
-
-    const itemSet = selectedItems.get(listId);
-    if (itemSet.has(itemId)) {
-        itemSet.delete(itemId);
-        if (itemSet.size === 0) {
-            selectedItems.delete(listId);
-        }
-    } else {
-        itemSet.add(itemId);
-    }
-
-    updateBulkActionsBar();
-    renderLists();
-}
-
-function updateBulkActionsBar() {
-    const totalSelected = Array.from(selectedItems.values())
-        .reduce((sum, set) => sum + set.size, 0);
-
-    if (totalSelected > 0) {
-        bulkActionsBar.style.display = 'flex';
-        selectedCount.textContent = `${totalSelected} selected`;
-    } else {
-        bulkActionsBar.style.display = 'none';
-    }
-}
-
-function toggleSelectionMode() {
-    isSelectionMode = !isSelectionMode;
-
-    if (!isSelectionMode) {
-        // Exiting selection mode, clear selections
-        selectedItems.clear();
-    }
-
-    updateBulkActionsBar();
-    updateSelectionModeButton();
-    renderLists();
-}
-
-function updateSelectionModeButton() {
-    if (isSelectionMode) {
-        selectionModeBtn.style.background = 'var(--primary-color)';
-        selectionModeBtn.style.color = 'white';
-        selectionModeBtn.title = 'Exit Selection Mode';
-    } else {
-        selectionModeBtn.style.background = '';
-        selectionModeBtn.style.color = '';
-        selectionModeBtn.title = 'Selection Mode';
-    }
-}
-
-function clearSelection() {
-    selectedItems.clear();
-    isSelectionMode = false;
-    updateBulkActionsBar();
-    updateSelectionModeButton();
-    renderLists();
-}
-
-async function handleBulkComplete() {
-    try {
-        const promises = [];
-        for (const [listId, itemIds] of selectedItems.entries()) {
-            promises.push(FirebaseService.toggleItemsCompletion(listId, Array.from(itemIds), true));
-        }
-        await Promise.all(promises);
-        clearSelection();
-        showToast('Items completed!', 'success');
-    } catch (error) {
-        console.error('Error completing items:', error);
-        showToast('Failed to complete items', 'error');
-    }
-}
-
-async function handleBulkDelete() {
-    const totalSelected = Array.from(selectedItems.values())
-        .reduce((sum, set) => sum + set.size, 0);
-
-    const confirmed = confirm(`Delete ${totalSelected} selected item(s)?`);
-    if (!confirmed) return;
-
-    try {
-        const promises = [];
-        for (const [listId, itemIds] of selectedItems.entries()) {
-            promises.push(FirebaseService.deleteItems(listId, Array.from(itemIds)));
-        }
-        await Promise.all(promises);
-        clearSelection();
-        showToast('Items deleted!', 'success');
-    } catch (error) {
-        console.error('Error deleting items:', error);
-        showToast('Failed to delete items', 'error');
-    }
-}
-
-async function handleBulkMove() {
-    // For bulk move, we need to show a list selector
-    const targetListId = prompt('Enter destination list ID (feature to be enhanced with modal)');
-    if (!targetListId) return;
-
-    showToast('Bulk move feature coming soon! Use edit modal for now.', 'warning');
 }
 
 // Event Delegation for Dynamic Elements
-listsContainer.addEventListener('click', (e) => {
+itemsContainer.addEventListener('click', (e) => {
     const action = e.target.dataset.action || e.target.closest('[data-action]')?.dataset.action;
     if (!action) return;
 
-    const listItem = e.target.closest('.list-item');
-    if (!listItem) return;
+    const row = e.target.closest('.item-row');
+    if (!row) return;
 
-    const itemId = listItem.dataset.itemId;
-    const listId = listItem.dataset.listId;
+    const itemId = row.dataset.itemId;
 
     switch (action) {
-        case 'select-item':
-            handleSelectItem(listId, itemId);
-            break;
         case 'toggle-item':
-            handleToggleItem(listId, itemId);
+            handleToggleItem(itemId);
             break;
         case 'edit-item':
-            openEditItemModal(listId, itemId);
+            openEditItemModal(itemId);
             break;
         case 'delete-item':
-            handleDeleteItem(listId, itemId);
+            handleDeleteItem(itemId);
             break;
     }
 });
-
-// Collapsible Lists
-function toggleListCollapse(listId) {
-    if (collapsedLists.has(listId)) {
-        collapsedLists.delete(listId);
-    } else {
-        collapsedLists.add(listId);
-    }
-
-    saveCollapsedState();
-
-    const card = document.querySelector(`[data-list-id="${listId}"].list-card`);
-    if (card) {
-        card.classList.toggle('collapsed');
-    }
-}
-
-function saveCollapsedState() {
-    localStorage.setItem('collapsedLists', JSON.stringify([...collapsedLists]));
-}
-
-// Drag and Drop
-function setupDragAndDrop() {
-    // Items drag and drop
-    const items = document.querySelectorAll('.list-item');
-    items.forEach(item => {
-        item.addEventListener('dragstart', handleItemDragStart);
-        item.addEventListener('dragend', handleItemDragEnd);
-        item.addEventListener('dragover', handleItemDragOver);
-        item.addEventListener('drop', handleItemDrop);
-
-        // Touch events for mobile
-        item.addEventListener('touchstart', handleItemTouchStart, { passive: false });
-        item.addEventListener('touchmove', handleItemTouchMove, { passive: false });
-        item.addEventListener('touchend', handleItemTouchEnd);
-    });
-
-    // Allow dropping on list containers for cross-list moves
-    const listContainers = document.querySelectorAll('.list-items');
-    listContainers.forEach(container => {
-        container.addEventListener('dragover', handleListDragOver);
-        container.addEventListener('drop', handleListDrop);
-        container.addEventListener('dragleave', handleListDragLeave);
-    });
-
-    // List cards drag and drop for reordering
-    const listCards = document.querySelectorAll('.list-card');
-    listCards.forEach((card, index) => {
-        card.setAttribute('draggable', 'true');
-        card.addEventListener('dragstart', handleListCardDragStart);
-        card.addEventListener('dragend', handleListCardDragEnd);
-        card.addEventListener('dragover', handleListCardDragOver);
-        card.addEventListener('drop', handleListCardDrop);
-
-        // Touch events for mobile list reordering
-        card.addEventListener('touchstart', handleListCardTouchStart, { passive: false });
-        card.addEventListener('touchmove', handleListCardTouchMove, { passive: false });
-        card.addEventListener('touchend', handleListCardTouchEnd);
-    });
-}
-
-function handleItemDragStart(e) {
-    draggedElement = e.target;
-    draggedItemId = e.target.dataset.itemId;
-    draggedListId = e.target.dataset.listId;
-    e.target.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-}
-
-function handleItemDragEnd(e) {
-    e.target.classList.remove('dragging');
-    document.querySelectorAll('.drag-over').forEach(el => {
-        el.classList.remove('drag-over');
-    });
-}
-
-function handleItemDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-
-    const targetItem = e.target.closest('.list-item');
-    if (targetItem && targetItem !== draggedElement) {
-        targetItem.classList.add('drag-over');
-    }
-}
-
-async function handleItemDrop(e) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const targetItem = e.target.closest('.list-item');
-    if (!targetItem || targetItem === draggedElement) return;
-
-    const targetItemId = targetItem.dataset.itemId;
-    const targetListId = targetItem.dataset.listId;
-
-    targetItem.classList.remove('drag-over');
-
-    // Same list - reorder
-    if (draggedListId === targetListId) {
-        const list = currentLists.find(l => l.id === draggedListId);
-        if (!list) return;
-
-        const draggedIndex = list.items.findIndex(i => i.id === draggedItemId);
-        const targetIndex = list.items.findIndex(i => i.id === targetItemId);
-
-        if (draggedIndex === -1 || targetIndex === -1) return;
-
-        // Reorder array
-        const items = [...list.items];
-        const [removed] = items.splice(draggedIndex, 1);
-        items.splice(targetIndex, 0, removed);
-
-        try {
-            await FirebaseService.reorderItems(draggedListId, items.map(i => i.id));
-        } catch (error) {
-            console.error('Error reordering items:', error);
-            showToast('Failed to reorder items', 'error');
-        }
-    } else {
-        // Different list - move item
-        try {
-            await FirebaseService.moveItem(draggedListId, targetListId, draggedItemId);
-            showToast('Item moved!', 'success');
-        } catch (error) {
-            console.error('Error moving item:', error);
-            showToast('Failed to move item', 'error');
-        }
-    }
-}
-
-function handleListDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    const listContainer = e.currentTarget;
-    listContainer.classList.add('drag-over-list');
-}
-
-function handleListDragLeave(e) {
-    const listContainer = e.currentTarget;
-    // Only remove if leaving the container, not entering a child
-    if (!listContainer.contains(e.relatedTarget)) {
-        listContainer.classList.remove('drag-over-list');
-    }
-}
-
-async function handleListDrop(e) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const listContainer = e.currentTarget;
-    const targetListId = listContainer.dataset.listId;
-
-    listContainer.classList.remove('drag-over-list');
-
-    if (!draggedItemId || !draggedListId || !targetListId) return;
-
-    // Don't do anything if dropping on same list
-    if (draggedListId === targetListId) return;
-
-    // Move item to the target list
-    try {
-        await FirebaseService.moveItem(draggedListId, targetListId, draggedItemId);
-        showToast('Item moved!', 'success');
-    } catch (error) {
-        console.error('Error moving item:', error);
-        showToast('Failed to move item', 'error');
-    }
-}
-
-// List Card Drag and Drop for Reordering
-let draggedListCard = null;
-let draggedListCardId = null;
-
-function handleListCardDragStart(e) {
-    // Don't drag if clicking on buttons
-    if (e.target.closest('button') || e.target.closest('input')) {
-        e.preventDefault();
-        return;
-    }
-
-    draggedListCard = e.currentTarget;
-    draggedListCardId = e.currentTarget.dataset.listId;
-    e.currentTarget.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-}
-
-function handleListCardDragEnd(e) {
-    e.currentTarget.classList.remove('dragging');
-    document.querySelectorAll('.list-card').forEach(card => {
-        card.classList.remove('drag-over');
-    });
-}
-
-function handleListCardDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-
-    const targetCard = e.currentTarget;
-    if (targetCard !== draggedListCard) {
-        targetCard.classList.add('drag-over');
-    }
-}
-
-async function handleListCardDrop(e) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const targetCard = e.currentTarget;
-    const targetListId = targetCard.dataset.listId;
-
-    targetCard.classList.remove('drag-over');
-
-    if (!draggedListCardId || !targetListId || draggedListCardId === targetListId) return;
-
-    // Find indices
-    const draggedIndex = currentLists.findIndex(l => l.id === draggedListCardId);
-    const targetIndex = currentLists.findIndex(l => l.id === targetListId);
-
-    if (draggedIndex === -1 || targetIndex === -1) return;
-
-    // Reorder array
-    const reorderedLists = [...currentLists];
-    const [removed] = reorderedLists.splice(draggedIndex, 1);
-    reorderedLists.splice(targetIndex, 0, removed);
-
-    try {
-        await FirebaseService.reorderLists(reorderedLists.map(l => l.id));
-        showToast('Lists reordered!', 'success');
-    } catch (error) {
-        console.error('Error reordering lists:', error);
-        showToast('Failed to reorder lists', 'error');
-    }
-}
-
-// Touch Event Handlers for Mobile Drag and Drop
-let touchStartY = 0;
-let touchStartX = 0;
-let touchedElement = null;
-let touchedItemId = null;
-let touchedListId = null;
-let isDragging = false;
-let currentDropTarget = null;
-let longPressTimeout = null;
-let hasMoved = false;
-
-function handleItemTouchStart(e) {
-    // Don't start drag if touching a button
-    if (e.target.closest('button') || e.target.closest('input')) {
-        return;
-    }
-
-    // Store touched element and position
-    touchedElement = e.currentTarget;
-    touchedItemId = e.currentTarget.dataset.itemId;
-    touchedListId = e.currentTarget.dataset.listId;
-
-    const touch = e.touches[0];
-    touchStartX = touch.clientX;
-    touchStartY = touch.clientY;
-
-    isDragging = false;
-    hasMoved = false;
-
-    // Clear any existing timeout
-    if (longPressTimeout) {
-        clearTimeout(longPressTimeout);
-    }
-
-    // Require a long press (500ms) to activate drag mode
-    longPressTimeout = setTimeout(() => {
-        // Only activate if user hasn't moved significantly
-        if (touchedElement && !hasMoved) {
-            isDragging = true;
-            touchedElement.classList.add('dragging');
-
-            // Haptic feedback if available
-            if (navigator.vibrate) {
-                navigator.vibrate(50);
-            }
-
-            // Visual feedback - keep scaled until touch ends
-            touchedElement.style.transition = 'transform 0.1s ease';
-            touchedElement.style.transform = 'scale(1.05)';
-        }
-    }, 500);
-}
-
-function handleItemTouchMove(e) {
-    if (!touchedElement) return;
-
-    const touch = e.touches[0];
-    const deltaX = Math.abs(touch.clientX - touchStartX);
-    const deltaY = Math.abs(touch.clientY - touchStartY);
-
-    // Check if user has moved significantly during long press delay
-    if (!isDragging && (deltaX > 15 || deltaY > 15)) {
-        // User is scrolling, cancel the long press
-        hasMoved = true;
-        if (longPressTimeout) {
-            clearTimeout(longPressTimeout);
-            longPressTimeout = null;
-        }
-        // Allow normal scrolling
-        touchedElement = null;
-        touchedItemId = null;
-        touchedListId = null;
-        return;
-    }
-
-    // Only handle drag operations if drag mode is active
-    if (!isDragging) return;
-
-    // Prevent scrolling while actively dragging
-    e.preventDefault();
-
-    // Find element under touch point
-    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-    const dropTarget = elementBelow?.closest('.list-item') || elementBelow?.closest('.list-items');
-
-    // Remove previous drop target highlight
-    if (currentDropTarget && currentDropTarget !== dropTarget) {
-        currentDropTarget.classList.remove('drag-over', 'drag-over-list');
-    }
-
-    // Add highlight to new drop target
-    if (dropTarget && dropTarget !== touchedElement) {
-        currentDropTarget = dropTarget;
-        if (dropTarget.classList.contains('list-item')) {
-            dropTarget.classList.add('drag-over');
-        } else if (dropTarget.classList.contains('list-items')) {
-            dropTarget.classList.add('drag-over-list');
-        }
-    }
-}
-
-async function handleItemTouchEnd(e) {
-    // Clear long press timeout if still running
-    if (longPressTimeout) {
-        clearTimeout(longPressTimeout);
-        longPressTimeout = null;
-    }
-
-    if (!touchedElement) return;
-
-    // Clear visual feedback
-    touchedElement.classList.remove('dragging');
-    touchedElement.style.transform = '';
-
-    if (currentDropTarget) {
-        currentDropTarget.classList.remove('drag-over', 'drag-over-list');
-    }
-
-    if (!isDragging) {
-        // Reset if didn't actually drag
-        touchedElement = null;
-        touchedItemId = null;
-        touchedListId = null;
-        currentDropTarget = null;
-        hasMoved = false;
-        return;
-    }
-
-    const touch = e.changedTouches[0];
-    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-    const targetItem = elementBelow?.closest('.list-item');
-    const targetListContainer = elementBelow?.closest('.list-items');
-
-    // Drop on another item
-    if (targetItem && targetItem !== touchedElement) {
-        const targetItemId = targetItem.dataset.itemId;
-        const targetListId = targetItem.dataset.listId;
-
-        // Same list - reorder
-        if (touchedListId === targetListId) {
-            const list = currentLists.find(l => l.id === touchedListId);
-            if (list) {
-                const draggedIndex = list.items.findIndex(i => i.id === touchedItemId);
-                const targetIndex = list.items.findIndex(i => i.id === targetItemId);
-
-                if (draggedIndex !== -1 && targetIndex !== -1) {
-                    const items = [...list.items];
-                    const [removed] = items.splice(draggedIndex, 1);
-                    items.splice(targetIndex, 0, removed);
-
-                    try {
-                        await FirebaseService.reorderItems(touchedListId, items.map(i => i.id));
-                    } catch (error) {
-                        console.error('Error reordering items:', error);
-                        showToast('Failed to reorder items', 'error');
-                    }
-                }
-            }
-        } else {
-            // Different list - move item
-            try {
-                await FirebaseService.moveItem(touchedListId, targetListId, touchedItemId);
-                showToast('Item moved!', 'success');
-            } catch (error) {
-                console.error('Error moving item:', error);
-                showToast('Failed to move item', 'error');
-            }
-        }
-    }
-    // Drop on empty list container
-    else if (targetListContainer && !targetItem) {
-        const targetListId = targetListContainer.dataset.listId;
-
-        if (targetListId && targetListId !== touchedListId) {
-            try {
-                await FirebaseService.moveItem(touchedListId, targetListId, touchedItemId);
-                showToast('Item moved!', 'success');
-            } catch (error) {
-                console.error('Error moving item:', error);
-                showToast('Failed to move item', 'error');
-            }
-        }
-    }
-
-    // Reset state
-    touchedElement = null;
-    touchedItemId = null;
-    touchedListId = null;
-    isDragging = false;
-    currentDropTarget = null;
-    hasMoved = false;
-}
-
-// Touch handlers for list card reordering
-let touchedListCard = null;
-let touchedListCardId = null;
-let listDragging = false;
-let listLongPressTimeout = null;
-let listHasMoved = false;
-
-function handleListCardTouchStart(e) {
-    // Don't drag if touching buttons or inputs
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.list-items')) {
-        return;
-    }
-
-    touchedListCard = e.currentTarget;
-    touchedListCardId = e.currentTarget.dataset.listId;
-
-    const touch = e.touches[0];
-    touchStartX = touch.clientX;
-    touchStartY = touch.clientY;
-
-    listDragging = false;
-    listHasMoved = false;
-
-    // Clear any existing timeout
-    if (listLongPressTimeout) {
-        clearTimeout(listLongPressTimeout);
-    }
-
-    // Require a long press (500ms) to activate drag mode for lists
-    listLongPressTimeout = setTimeout(() => {
-        // Only activate if user hasn't moved significantly
-        if (touchedListCard && !listHasMoved) {
-            listDragging = true;
-            touchedListCard.classList.add('dragging');
-
-            // Haptic feedback if available
-            if (navigator.vibrate) {
-                navigator.vibrate(50);
-            }
-
-            // Visual feedback - keep scaled until touch ends
-            touchedListCard.style.transition = 'transform 0.1s ease';
-            touchedListCard.style.transform = 'scale(1.02)';
-        }
-    }, 500);
-}
-
-function handleListCardTouchMove(e) {
-    if (!touchedListCard) return;
-
-    const touch = e.touches[0];
-    const deltaX = Math.abs(touch.clientX - touchStartX);
-    const deltaY = Math.abs(touch.clientY - touchStartY);
-
-    // Check if user has moved significantly during long press delay
-    if (!listDragging && (deltaX > 15 || deltaY > 15)) {
-        // User is scrolling, cancel the long press
-        listHasMoved = true;
-        if (listLongPressTimeout) {
-            clearTimeout(listLongPressTimeout);
-            listLongPressTimeout = null;
-        }
-        // Allow normal scrolling
-        touchedListCard = null;
-        touchedListCardId = null;
-        return;
-    }
-
-    // Only handle drag operations if drag mode is active
-    if (!listDragging) return;
-
-    // Prevent scrolling while actively dragging
-    e.preventDefault();
-
-    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-    const dropTarget = elementBelow?.closest('.list-card');
-
-    document.querySelectorAll('.list-card').forEach(card => {
-        card.classList.remove('drag-over');
-    });
-
-    if (dropTarget && dropTarget !== touchedListCard) {
-        dropTarget.classList.add('drag-over');
-    }
-}
-
-async function handleListCardTouchEnd(e) {
-    // Clear long press timeout if still running
-    if (listLongPressTimeout) {
-        clearTimeout(listLongPressTimeout);
-        listLongPressTimeout = null;
-    }
-
-    if (!touchedListCard) return;
-
-    // Clear visual feedback
-    touchedListCard.classList.remove('dragging');
-    touchedListCard.style.transform = '';
-    document.querySelectorAll('.list-card').forEach(card => {
-        card.classList.remove('drag-over');
-    });
-
-    if (!listDragging) {
-        touchedListCard = null;
-        touchedListCardId = null;
-        listHasMoved = false;
-        return;
-    }
-
-    const touch = e.changedTouches[0];
-    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-    const targetCard = elementBelow?.closest('.list-card');
-
-    if (targetCard && targetCard !== touchedListCard) {
-        const targetListId = targetCard.dataset.listId;
-
-        if (touchedListCardId && targetListId && touchedListCardId !== targetListId) {
-            const draggedIndex = currentLists.findIndex(l => l.id === touchedListCardId);
-            const targetIndex = currentLists.findIndex(l => l.id === targetListId);
-
-            if (draggedIndex !== -1 && targetIndex !== -1) {
-                const reorderedLists = [...currentLists];
-                const [removed] = reorderedLists.splice(draggedIndex, 1);
-                reorderedLists.splice(targetIndex, 0, removed);
-
-                try {
-                    await FirebaseService.reorderLists(reorderedLists.map(l => l.id));
-                    showToast('Lists reordered!', 'success');
-                } catch (error) {
-                    console.error('Error reordering lists:', error);
-                    showToast('Failed to reorder lists', 'error');
-                }
-            }
-        }
-    }
-
-    touchedListCard = null;
-    touchedListCardId = null;
-    listDragging = false;
-    listHasMoved = false;
-}
 
 // Search
 function toggleSearch() {
@@ -1510,33 +346,25 @@ function handleSearch() {
         return;
     }
 
-    const results = FirebaseService.searchAllLists(currentLists, searchTerm);
+    const results = FirebaseService.searchItems(currentItems, searchTerm);
 
     if (results.length === 0) {
-        searchResults.innerHTML = '<div class="empty-list">No items found</div>';
+        searchResults.innerHTML = '<div class="empty-list">No notes found</div>';
         return;
     }
 
-    searchResults.innerHTML = results.map(result => `
-        <div class="search-result-item" data-list-id="${result.listId}" data-item-id="${result.item.id}">
-            <div class="search-result-list">${result.listIcon} ${result.listName}</div>
-            <div class="search-result-text">${escapeHtml(result.item.text)}</div>
+    searchResults.innerHTML = results.map(item => `
+        <div class="search-result-item" data-item-id="${item.id}">
+            <div class="search-result-text">${escapeHtml(item.text)}</div>
         </div>
     `).join('');
 
-    // Add click handlers
     searchResults.querySelectorAll('.search-result-item').forEach(el => {
         el.addEventListener('click', () => {
-            const listId = el.dataset.listId;
-            // Expand the list if collapsed
-            collapsedLists.delete(listId);
-            saveCollapsedState();
-            renderLists();
             toggleSearch();
 
-            // Scroll to item (optional enhancement)
             setTimeout(() => {
-                const itemEl = document.querySelector(`[data-item-id="${el.dataset.itemId}"]`);
+                const itemEl = document.querySelector(`.item-row[data-item-id="${el.dataset.itemId}"]`);
                 if (itemEl) {
                     itemEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     itemEl.style.background = 'var(--warning-color)';
@@ -1544,7 +372,7 @@ function handleSearch() {
                         itemEl.style.background = '';
                     }, 1000);
                 }
-            }, 300);
+            }, 100);
         });
     });
 }
@@ -1557,7 +385,7 @@ async function handleExportData() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `quick-capture-lists-${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `quick-capture-${new Date().toISOString().split('T')[0]}.json`;
         a.click();
         URL.revokeObjectURL(url);
         showToast('Data exported!', 'success');
@@ -1579,15 +407,14 @@ async function handleImportFileSelected(e) {
         const text = await file.text();
         const data = JSON.parse(text);
 
-        // Validate data format
-        if (!data.lists || !Array.isArray(data.lists)) {
+        if (!data.items || !Array.isArray(data.items)) {
             showToast('Invalid data format', 'error');
             return;
         }
 
         const confirmed = confirm(
-            `This will import ${data.lists.length} list(s). ` +
-            'This will merge with your existing lists. Continue?'
+            `This will import ${data.items.length} note(s). ` +
+            'This will merge with your existing notes. Continue?'
         );
 
         if (!confirmed) {
@@ -1605,16 +432,16 @@ async function handleImportFileSelected(e) {
     }
 }
 
-async function handleClearAllCompleted() {
-    const confirmed = confirm('Are you sure you want to clear all completed items from all lists?');
+async function handleClearCompleted() {
+    const confirmed = confirm('Are you sure you want to clear all completed notes?');
     if (!confirmed) return;
 
     try {
-        await FirebaseService.clearAllCompletedItems();
-        showToast('All completed items cleared!', 'success');
+        const count = await FirebaseService.clearCompletedItems(currentItems);
+        showToast(count > 0 ? 'Completed notes cleared!' : 'No completed notes to clear', 'success');
     } catch (error) {
         console.error('Error clearing completed items:', error);
-        showToast('Failed to clear completed items', 'error');
+        showToast('Failed to clear completed notes', 'error');
     }
 }
 
@@ -1649,10 +476,6 @@ function showToast(message, type = 'success') {
 }
 
 // Loading State
-function showLoading() {
-    loadingIndicator.classList.remove('hidden');
-}
-
 function hideLoading() {
     loadingIndicator.classList.add('hidden');
 }
