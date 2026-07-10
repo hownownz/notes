@@ -1,14 +1,14 @@
 // Service Worker for Quick Capture PWA
-const CACHE_NAME = 'quick-capture-v2';
+const CACHE_NAME = 'quick-capture-v3';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/login.html',
-  '/app.js',
-  '/firebase-service.js',
-  '/firebase-config.js',
-  '/styles.css',
-  '/manifest.json'
+  './',
+  './index.html',
+  './login.html',
+  './app.js',
+  './firebase-service.js',
+  './firebase-config.js',
+  './styles.css',
+  './manifest.json'
 ];
 
 // Install event - cache files
@@ -76,7 +76,7 @@ self.addEventListener('fetch', event => {
           return response;
         }).catch(() => {
           // Network failed, check if we have a cached fallback
-          return caches.match('/index.html');
+          return caches.match('./index.html');
         });
       })
   );
